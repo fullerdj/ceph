@@ -34,6 +34,7 @@ PROGNAME=$(basename $0)
 # xfstests is downloaded from this git repository and then built.
 # XFSTESTS_REPO="git://oss.sgi.com/xfs/cmds/xfstests.git"
 XFSTESTS_REPO="git://ceph.com/git/xfstests.git"
+XFSPROGS_REPO="git://oss.sgi.com/xfs/cmds/xfsprogs"
 
 # Default command line option values
 COUNT="1"
@@ -253,6 +254,8 @@ export EXT4_MKFS_OPTIONS="${EXT4_MKFS_OPTIONS:--F}"
 export BTRFS_MKFS_OPTION	# No defaults
 
 XFSTESTS_DIR="/var/lib/xfstests"	# Where the tests live
+XFSPROGS_DIR="${TESTDIR}/xfsprogs-install"
+export PATH="${XFSPROGS_DIR}/sbin:${PATH}"
 
 # download, build, and install xfstests
 function install_xfstests() {
@@ -288,10 +291,11 @@ function remove_xfstests() {
 # create a host options file that uses the specified devices
 function setup_host_options() {
 	arg_count 0 $#
+	mntdir="/tmp/cephtest"
 
 	# Create mount points for the test and scratch filesystems
-	local test_dir="$(mktemp -d ${TESTDIR}/test_dir.XXXXXXXXXX)"
-	local scratch_dir="$(mktemp -d ${TESTDIR}/scratch_mnt.XXXXXXXXXX)"
+	local test_dir="$(mktemp -d ${mntdir}/test_dir.XXXXXXXXXX)"
+	local scratch_dir="$(mktemp -d ${mntdir}/scratch_mnt.XXXXXXXXXX)"
 
 	# Write a host options file that uses these devices.
 	# xfstests uses the file defined by HOST_OPTIONS as the
@@ -371,6 +375,8 @@ function do_umount() {
 function setup_xfstests() {
 	arg_count 0 $#
 
+	adduser fsgqa
+
 	# TEST_DEV can persist across test runs, but for now we
 	# don't bother.   I believe xfstests prefers its devices to
 	# have been already been formatted for the desired
@@ -389,17 +395,43 @@ function setup_xfstests() {
 function cleanup_xfstests() {
 	arg_count 0 $#
 
+	userdel -r fsgqa
+
 	# Unmount these in case a test left them mounted (plus
 	# the corresponding setup function mounted them...)
 	do_umount "${TEST_DEV}"
 	do_umount "${SCRATCH_DEV}"
 }
 
+function install_xfsprogs() {
+	arg_count 0 $#
+
+	pushd "${TEST_DIR}"
+	git clone ${XFSPROGS_REPO}
+	cd xfsprogs
+	libtoolize -c `libtoolize -n -i >/dev/null 2>/dev/null && echo -i` -f
+	cp include/install-sh .
+	aclocal -I m4
+	autoconf
+	./configure --prefix=${XFSPROGS_DIR}
+	make install
+	popd
+}
+
+function remove_xfsprogs() {
+	arg_count 0 $#
+
+	rm -rf ${XFSPROGS_DIR}
+	rm -rf xfsprogs
+}	
+
+
 # top-level setup routine
 function setup() {
 	arg_count 0 $#
 
 	setup_host_options
+	install_xfsprogs
 	install_xfstests
 	setup_xfstests
 }
@@ -411,6 +443,7 @@ function cleanup() {
 	cd /
 	cleanup_xfstests
 	remove_xfstests
+	remove_xfsprogs
 	cleanup_host_options
 }
 trap cleanup EXIT ERR HUP INT QUIT
