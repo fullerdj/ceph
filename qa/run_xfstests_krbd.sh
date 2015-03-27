@@ -10,7 +10,7 @@ set -x
 
 #URL_BASE="https://ceph.com/git/?p=ceph.git;a=blob_plain;f=qa"
 branch=wip-xfstests-update
-URL_BASE="https://raw.githubusercontent.com/fullerdj/ceph/${branch}/qa/run_xfstests_krbd.sh"
+URL_BASE="https://raw.githubusercontent.com/fullerdj/ceph/${branch}/qa/"
 SCRIPT="run_xfstests.sh"
 
 cd "${TESTDIR}"
