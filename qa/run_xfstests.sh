@@ -294,7 +294,7 @@ function setup_host_options() {
 	export MNTDIR="/tmp/cephtest"
 
 	# Create mount points for the test and scratch filesystems
-	mkdir -p ${mntdir}
+	mkdir -p ${MNTDIR}
 	local test_dir="$(mktemp -d ${mntdir}/test_dir.XXXXXXXXXX)"
 	local scratch_dir="$(mktemp -d ${mntdir}/scratch_mnt.XXXXXXXXXX)"
 
