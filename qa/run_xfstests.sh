@@ -291,9 +291,10 @@ function remove_xfstests() {
 # create a host options file that uses the specified devices
 function setup_host_options() {
 	arg_count 0 $#
-	mntdir="/tmp/cephtest"
+	export MNTDIR="/tmp/cephtest"
 
 	# Create mount points for the test and scratch filesystems
+	mkdir -p ${mntdir}
 	local test_dir="$(mktemp -d ${mntdir}/test_dir.XXXXXXXXXX)"
 	local scratch_dir="$(mktemp -d ${mntdir}/scratch_mnt.XXXXXXXXXX)"
 
@@ -401,6 +402,9 @@ function cleanup_xfstests() {
 	# the corresponding setup function mounted them...)
 	do_umount "${TEST_DEV}"
 	do_umount "${SCRATCH_DEV}"
+	rmdir "${TEST_DIR}"
+	rmdir "${SCRATCH_MNT}"
+	rmdir "${MNTDIR}"
 }
 
 function install_xfsprogs() {
