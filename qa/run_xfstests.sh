@@ -295,8 +295,8 @@ function setup_host_options() {
 
 	# Create mount points for the test and scratch filesystems
 	mkdir -p ${MNTDIR}
-	local test_dir="$(mktemp -d ${mntdir}/test_dir.XXXXXXXXXX)"
-	local scratch_dir="$(mktemp -d ${mntdir}/scratch_mnt.XXXXXXXXXX)"
+	local test_dir="$(mktemp -d ${MNTDIR}/test_dir.XXXXXXXXXX)"
+	local scratch_dir="$(mktemp -d ${MNTDIR}/scratch_mnt.XXXXXXXXXX)"
 
 	# Write a host options file that uses these devices.
 	# xfstests uses the file defined by HOST_OPTIONS as the
@@ -376,8 +376,6 @@ function do_umount() {
 function setup_xfstests() {
 	arg_count 0 $#
 
-	adduser fsgqa
-
 	# TEST_DEV can persist across test runs, but for now we
 	# don't bother.   I believe xfstests prefers its devices to
 	# have been already been formatted for the desired
@@ -395,8 +393,6 @@ function setup_xfstests() {
 # clean up changes made by setup_xfstests
 function cleanup_xfstests() {
 	arg_count 0 $#
-
-	userdel -r fsgqa
 
 	# Unmount these in case a test left them mounted (plus
 	# the corresponding setup function mounted them...)
@@ -419,6 +415,7 @@ function install_xfsprogs() {
 	autoconf
 	./configure --prefix=${XFSPROGS_DIR}
 	make install
+	echo *************${PATH}***************
 	popd
 }
 
