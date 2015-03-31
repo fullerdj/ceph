@@ -409,8 +409,8 @@ function install_xfsprogs() {
 
 	pushd "${TESTDIR}"
 	git clone ${XFSPROGS_REPO}
-	git checkout ${XFSPROGS_VERSION}
 	cd xfsprogs
+	git checkout ${XFSPROGS_VERSION}
 	libtoolize -c `libtoolize -n -i >/dev/null 2>/dev/null && echo -i` -f
 	cp include/install-sh .
 	aclocal -I m4
