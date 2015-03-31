@@ -35,6 +35,7 @@ PROGNAME=$(basename $0)
 # XFSTESTS_REPO="git://oss.sgi.com/xfs/cmds/xfstests.git"
 XFSTESTS_REPO="git://ceph.com/git/xfstests.git"
 XFSPROGS_REPO="git://oss.sgi.com/xfs/cmds/xfsprogs"
+XFSPROGS_VERSION="v3.2.2"
 
 # Default command line option values
 COUNT="1"
@@ -406,8 +407,9 @@ function cleanup_xfstests() {
 function install_xfsprogs() {
 	arg_count 0 $#
 
-	pushd "${TEST_DIR}"
+	pushd "${TESTDIR}"
 	git clone ${XFSPROGS_REPO}
+	git checkout ${XFSPROGS_VERSION}
 	cd xfsprogs
 	libtoolize -c `libtoolize -n -i >/dev/null 2>/dev/null && echo -i` -f
 	cp include/install-sh .

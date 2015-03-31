@@ -44,6 +44,7 @@ cat > "${EXPUNGE}" <<-!
 	shared/272	# not for xfs
 	shared/289	# not for xfs
 
+	xfs/007		# sector size math
 	xfs/030		# mkfs.xfs -dsize=100m,agcount=6 fails
 			#  when sunit=swidth=8192
 	xfs/032		# xfs_copy cleans up with pthread_kill (RHBA-2015-0537)
@@ -69,6 +70,7 @@ cat > "${EXPUNGE}" <<-!
 	xfs/242		# _filter_bmap in common/punch parses incorrectly if
 			#  blocks are not stripe-aligned
 	xfs/261		# bug in mount_xfs involving creation of new quota files
+	xfs/279		# sector size math (logical v. physical: BZ836433?)
 	xfs/300		# SELinux
 !
 
