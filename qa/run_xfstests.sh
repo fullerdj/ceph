@@ -255,7 +255,7 @@ export EXT4_MKFS_OPTIONS="${EXT4_MKFS_OPTIONS:--F}"
 export BTRFS_MKFS_OPTION	# No defaults
 
 XFSTESTS_DIR="/var/lib/xfstests"	# Where the tests live
-XFSPROGS_DIR="${TESTDIR}/xfsprogs-install"
+XFSPROGS_DIR="/tmp/cephtest/xfsprogs-install"
 export PATH="${XFSPROGS_DIR}/sbin:${PATH}"
 
 # download, build, and install xfstests
@@ -424,7 +424,6 @@ function remove_xfsprogs() {
 	arg_count 0 $#
 
 	rm -rf ${XFSPROGS_DIR}
-	rm -rf ${TESTDIR}/xfsprogs
 }	
 
 
