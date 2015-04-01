@@ -442,9 +442,9 @@ function cleanup() {
 	arg_count 0 $#
 
 	cd /
+	remove_xfsprogs
 	cleanup_xfstests
 	remove_xfstests
-	remove_xfsprogs
 	cleanup_host_options
 }
 trap cleanup EXIT ERR HUP INT QUIT
