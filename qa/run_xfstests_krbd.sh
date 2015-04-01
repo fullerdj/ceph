@@ -15,7 +15,7 @@ SCRIPT="run_xfstests.sh"
 
 cd "${TESTDIR}"
 
-wget -O "${SCRIPT}" "${URL_BASE}/${SCRIPT}"
+wget --no-check-certificate -O "${SCRIPT}" "${URL_BASE}/${SCRIPT}"
 chmod +x "${SCRIPT}"
 
 EXPUNGE="$(mktemp expunge.XXXXXXXXXX)"
