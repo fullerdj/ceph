@@ -417,7 +417,6 @@ function install_xfsprogs() {
 	autoconf
 	./configure --prefix=${XFSPROGS_DIR}
 	make install
-	echo *************${PATH}***************
 	popd
 }
 
@@ -425,7 +424,7 @@ function remove_xfsprogs() {
 	arg_count 0 $#
 
 	rm -rf ${XFSPROGS_DIR}
-	rm -rf xfsprogs
+	rm -rf ${TESTDIR}/xfsprogs
 }	
 
 

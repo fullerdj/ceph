@@ -71,6 +71,7 @@ cat > "${EXPUNGE}" <<-!
 			#  blocks are not stripe-aligned
 	xfs/261		# bug in mount_xfs involving creation of new quota files
 	xfs/279		# sector size math (logical v. physical: BZ836433?)
+	xfs/297		# XXX: temporarily expunged due to length
 	xfs/300		# SELinux
 !
 
