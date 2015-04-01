@@ -423,6 +423,7 @@ function install_xfsprogs() {
 function remove_xfsprogs() {
 	arg_count 0 $#
 
+	rm -rf ${TESTDIR}/xfsprogs
 	rm -rf ${XFSPROGS_DIR}
 }	
 
