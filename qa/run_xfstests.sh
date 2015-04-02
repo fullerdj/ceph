@@ -36,6 +36,8 @@ PROGNAME=$(basename $0)
 XFSTESTS_REPO="git://ceph.com/git/xfstests.git"
 XFSPROGS_REPO="git://oss.sgi.com/xfs/cmds/xfsprogs"
 XFSPROGS_VERSION="v3.2.2"
+XFSDUMP_REPO="git://oss.sgi.com/xfs/cmds/xfsdump"
+XFSDUMP_VERSION="v3.1.4"
 
 # Default command line option values
 COUNT="1"
@@ -256,7 +258,8 @@ export BTRFS_MKFS_OPTION	# No defaults
 
 XFSTESTS_DIR="/var/lib/xfstests"	# Where the tests live
 XFSPROGS_DIR="/tmp/cephtest/xfsprogs-install"
-export PATH="${XFSPROGS_DIR}/sbin:${PATH}"
+XFSDUMP_DIR="/tmp/cephtest/xfsdump-install"
+export PATH="${XFSPROGS_DIR}/sbin:${XFSDUMP_DIR}/sbin:${PATH}"
 
 # download, build, and install xfstests
 function install_xfstests() {
@@ -420,12 +423,40 @@ function install_xfsprogs() {
 	popd
 }
 
+function install_xfsdump() {
+	arg_count 0 $#
+
+	pushd "${TESTDIR}"
+	git clone ${XFSDUMP_REPO}
+	cd xfsdump
+	git checkout ${XFSDUMP_VERSION}
+
+	# somebody took #define min and #define max out, which breaks the build on
+	# ubuntu. we back out this commit here, though that may cause problems with
+	# this script down the line.
+	git revert -n 5a2985233c390d59d2a9757b119cb0e001c87a96
+	libtoolize -c `libtoolize -n -i >/dev/null 2>/dev/null && echo -i` -f
+	cp include/install-sh .
+	aclocal -I m4
+	autoconf
+	./configure --prefix=${XFSDUMP_DIR}
+	make -k install # that's right, the install process is broken too
+	popd
+}
+
 function remove_xfsprogs() {
 	arg_count 0 $#
 
 	rm -rf ${TESTDIR}/xfsprogs
 	rm -rf ${XFSPROGS_DIR}
 }	
+
+function remove_xfsdump() {
+	arg_count 0 $#
+
+	rm -rf ${TESTDIR}/xfsdump
+	rm -rf ${XFSDUMP_DIR}
+}
 
 
 # top-level setup routine
@@ -444,6 +475,7 @@ function cleanup() {
 
 	cd /
 	remove_xfsprogs
+	remove_xfsdump
 	cleanup_xfstests
 	remove_xfstests
 	cleanup_host_options
