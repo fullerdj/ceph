@@ -465,6 +465,7 @@ function setup() {
 
 	setup_host_options
 	install_xfsprogs
+	install_xfsdump
 	install_xfstests
 	setup_xfstests
 }
