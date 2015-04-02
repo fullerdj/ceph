@@ -440,7 +440,7 @@ function install_xfsdump() {
 	aclocal -I m4
 	autoconf
 	./configure --prefix=${XFSDUMP_DIR}
-	make -k install # that's right, the install process is broken too
+	(make -k install || true) # that's right, the install process is broken too
 	popd
 }
 
