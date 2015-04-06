@@ -33,7 +33,6 @@ cat > "${EXPUNGE}" <<-!
 			#  remove newlines. This breaks parsing on some
 			#  platforms.
 	generic/050	# blockdev --setro right after mkfs returns EBUSY
-	generic/081	# tries to make a VG when rbd is not a PV
 	generic/083	# mkfs.xfs -dxize=104857600,agcount=6 fails
 			#  when sunit=swidth=8192
 	generic/093	# not for Linux
