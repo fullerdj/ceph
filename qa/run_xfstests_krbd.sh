@@ -8,14 +8,13 @@ set -x
 [ -n "${TESTDIR}" ] || export TESTDIR="/tmp/cephtest"
 [ -d "${TESTDIR}" ] || mkdir "${TESTDIR}"
 
-#URL_BASE="https://ceph.com/git/?p=ceph.git;a=blob_plain;f=qa"
-branch=wip-xfstests-update
-URL_BASE="https://raw.githubusercontent.com/fullerdj/ceph/${branch}/qa/"
-SCRIPT="run_xfstests.sh"
+if [ -z "${URL_BASE}" ]; then
+	URL_BASE="https://ceph.com/git/?p=ceph.git;a=blob_plain;f=qa"
+fi
 
 cd "${TESTDIR}"
 
-wget --no-check-certificate -O "${SCRIPT}" "${URL_BASE}/${SCRIPT}"
+wget -O "${SCRIPT}" "${URL_BASE}/${SCRIPT}"
 chmod +x "${SCRIPT}"
 
 EXPUNGE="$(mktemp expunge.XXXXXXXXXX)"
