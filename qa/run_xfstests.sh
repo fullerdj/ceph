@@ -252,7 +252,7 @@ export PATH="${TESTDIR}/binary/usr/local/sbin:${PATH}"
 ################################################################
 
 # Filesystem-specific mkfs options--set if not supplied
-export XFS_MKFS_OPTIONS="${XFS_MKFS_OPTIONS:--f -l su=65536}"
+#export XFS_MKFS_OPTIONS="${XFS_MKFS_OPTIONS:--f -l su=65536}"
 export EXT4_MKFS_OPTIONS="${EXT4_MKFS_OPTIONS:--F}"
 export BTRFS_MKFS_OPTION	# No defaults
 
