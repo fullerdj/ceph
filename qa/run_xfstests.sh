@@ -34,6 +34,7 @@ PROGNAME=$(basename $0)
 # xfstests is downloaded from this git repository and then built.
 # XFSTESTS_REPO="git://oss.sgi.com/xfs/cmds/xfstests.git"
 XFSTESTS_REPO="git://ceph.com/git/xfstests.git"
+XFSTESTS_VERSION="facff609afd6a2ca557c2b679e088982026aa188"
 XFSPROGS_REPO="git://oss.sgi.com/xfs/cmds/xfsprogs"
 XFSPROGS_VERSION="v3.2.2"
 XFSDUMP_REPO="git://oss.sgi.com/xfs/cmds/xfsdump"
@@ -273,6 +274,7 @@ function install_xfstests() {
 	git clone "${XFSTESTS_REPO}"
 
 	cd xfstests
+	git checkout "${XFSTESTS_VERSION}"
 
 	ncpu=$(getconf _NPROCESSORS_ONLN 2>&1)
 	[ -n "${ncpu}" -a "${ncpu}" -gt 1 ] && multiple="-j ${ncpu}"
