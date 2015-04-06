@@ -50,7 +50,7 @@ TESTS="-g auto"	# The "auto" group is supposed to be "known good"
 
 # rbd presents geometry information that causes mkfs.xfs to
 # issue a warning.  This option avoids this class of problems.
-XFS_MKFS_OPTIONS="-l su=32k"
+#XFS_MKFS_OPTIONS="-l su=32k"
 
 # print an error message and quit with non-zero status
 function err() {
