@@ -37,6 +37,7 @@ void DataScan::usage()
     << "    --force-corrupt: overrite apparently corrupt structures\n"
     << "    --force-init: write root inodes even if they exist\n"
     << "    --force-pool: use data pool even if it is not in FSMap\n"
+    << "    --override-size: overwrite found file sizes with guessed sizes\n"
     << "\n"
     << "  cephfs-data-scan scan_frags [--force-corrupt]\n"
     << "\n"
@@ -116,6 +117,9 @@ bool DataScan::parse_arg(
     return true;
   } else if (arg == "--force-init") {
     force_init = true;
+    return true;
+  } else if (arg == "--override-size") {
+    override_size = true;
     return true;
   } else {
     return false;
@@ -1403,6 +1407,12 @@ int MetadataDriver::inject_with_backtrace(
         dout(20) << "Dentry 0x" << std::hex
           << parent_ino << std::dec << "/"
           << dname << " already exists and points to me" << dendl;
+	if (override_size) {
+	  dout(4) << "changed size from " << existing_dentry.inode.size
+		  << " to " << dentry.inode.size << dendl;
+	  existing_dentry.inode.size = dentry.inode.size;
+	  int r = inject_linkage(parent_ino, dname, fragment, existing_dentry);
+	}
       } else {
         derr << "Dentry 0x" << std::hex
           << parent_ino << std::dec << "/"

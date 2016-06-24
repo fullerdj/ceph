@@ -277,6 +277,8 @@ class DataScan : public MDSUtility, public MetadataTool
     bool force_init;
     // Only scan inodes without this scrub tag
     string filter_tag;
+    // Overwrite old sizes with guessed sizes
+    bool override_size;
 
     /**
      * @param r set to error on valid key with invalid value
@@ -313,7 +315,7 @@ class DataScan : public MDSUtility, public MetadataTool
     DataScan()
       : driver(NULL), fscid(FS_CLUSTER_ID_NONE), data_pool_id(-1), n(0), m(1),
         force_pool(false), force_corrupt(false),
-        force_init(false)
+        force_init(false), override_size(false)
     {
     }
 
