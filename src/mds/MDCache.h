@@ -1129,6 +1129,7 @@ public:
   void dump_cache(const std::string &filename);
   void dump_cache(Formatter *f);
   void dump_cache(const std::string& dump_root, int depth, Formatter *f);
+  void dump_inode(const std::string& inodeno, Formatter *f);
 
   void dump_resolve_status(Formatter *f) const;
   void dump_rejoin_status(Formatter *f) const;

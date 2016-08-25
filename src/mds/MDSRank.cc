@@ -1764,6 +1764,13 @@ bool MDSRankDispatcher::handle_asok_command(
       Mutex::Locker l(mds_lock);
       mdcache->dump_cache(root, depth, f);
     }
+  } else if (command == "dump inode") {
+    string inodeno;
+    cmd_getval(g_ceph_context, cmdmap, "inodeno", inodeno);
+    {
+      Mutex::Locker l(mds_lock);
+      mdcache->dump_inode(inodeno, f);
+    }
   } else if (command == "force_readonly") {
     Mutex::Locker l(mds_lock);
     mdcache->force_readonly();

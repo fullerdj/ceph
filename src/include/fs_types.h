@@ -16,6 +16,7 @@ struct inodeno_t {
   inodeno_t() : val(0) {}
   // cppcheck-suppress noExplicitConstructor
   inodeno_t(_inodeno_t v) : val(v) {}
+  inodeno_t(const std::string& s) : val(std::stoull(s)) {}
   inodeno_t operator+=(inodeno_t o) { val += o.val; return *this; }
   operator _inodeno_t() const { return val; }
 

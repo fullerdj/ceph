@@ -11806,7 +11806,19 @@ void MDCache::dump_cache(const char *fn, Formatter *f,
   }
 }
 
+void MDCache::dump_inode(const std::string& inodeno, Formatter *f)
+{
+  auto it = inode_map.find(vinodeno_t(inodeno_t(inodeno), CEPH_NOSNAP));
 
+  if (it != inode_map.end()) {
+    f->open_object_section("inode");
+    it->second->dump(f);
+  } else {
+    f->open_object_section("result");
+    f->dump_int("return_code", -ENOENT);
+  }
+  f->close_section();
+}
 
 C_MDS_RetryRequest::C_MDS_RetryRequest(MDCache *c, MDRequestRef& r)
   : MDSInternalContext(c->mds), cache(c), mdr(r)
