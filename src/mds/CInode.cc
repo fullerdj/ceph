@@ -3939,6 +3939,10 @@ next:
 	if (!dir->scrub_infop->header && in->scrub_infop)
 	  dir->scrub_infop->header = in->scrub_infop->header;
         if (dir->is_complete()) {
+	  if (dir->is_frozen()) {
+	    dir->add_waiter(WAIT_UNFREEZE, get_internal_callback(INODE));
+	    return false;
+	  }
 	  dir->scrub_local();
 	} else {
 	  dir->scrub_infop->need_scrub_local = true;
@@ -4231,6 +4235,9 @@ void CInode::scrub_initialize(CDentry *scrub_parent,
 	scrub_infop->dirfrag_stamps[*i].reset();
       else
 	scrub_infop->dirfrag_stamps[*i];
+      CDir *dir = get_dirfrag(*i);
+      if (dir->is_auth())
+	dir->auth_pin(scrub_infop);
     }
   }
 
@@ -4333,6 +4340,19 @@ void CInode::scrub_finished(MDSInternalContextBase **c) {
     scrub_infop->scrub_parent = NULL;
     dn->dir->scrub_dentry_finished(dn);
     dn->put(CDentry::PIN_SCRUBPARENT);
+  }
+
+  if (is_dir()) { 
+    /*
+    for (compact_map<frag_t,CDir*>::iterator p = dirfrags.begin();
+	 p != dirfrags.end();
+	 ++p) {
+    */
+    for (auto& p : dirfrags) {
+      if (p->second->is_auth()) {
+	p->second->auth_unpin(scrub_infop);
+      }
+    }
   }
 
   *c = scrub_infop->on_finish;

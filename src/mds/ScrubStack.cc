@@ -290,6 +290,21 @@ void ScrubStack::scrub_dir_inode_final(CInode *in)
   return;
 }
 
+class C_MDS_ScrubDirfrag : public MDSInternalContext {
+protected:
+  ScrubStack* ss;
+  CDir *dir;
+  const ScrubHeaderRefConst &header;
+
+public:
+  C_MDS_ScrubDirfrag (ScrubStack* _ss, CDir *_dir, const ScrubHeaderRefConst &_header) : MDSInternalContext(_ss->mdcache->mds), ss(_ss), dir(_dir), header(_header) {}
+
+  void finish (int r) {
+    bool foo, bar, baz;
+    ss->scrub_dirfrag(dir, header, &foo, &bar, &baz);
+  }
+};
+    
 void ScrubStack::scrub_dirfrag(CDir *dir,
 			       const ScrubHeaderRefConst& header,
 			       bool *added_children, bool *is_terminal,
@@ -302,7 +317,25 @@ void ScrubStack::scrub_dirfrag(CDir *dir,
   *is_terminal = false;
   *done = false;
 
-  if (!dir->is_auth() && dir->is_subtree_root()) {
+  if (dir->is_ambiguous_auth()) {
+    dout(20) << "scrub: ambiguous: " << *dir << dendl;
+    C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(this, dir, header);
+    dir->add_waiter(CDir::WAIT_SINGLEAUTH, sdf);
+    *done = true;
+    *is_terminal = true;
+    return;
+  }
+
+  if (dir->is_frozen()) {
+    dout(20) << "scrub: frozen: " << *dir << dendl;
+    C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(this, dir, header);
+    dir->add_waiter(CDir::WAIT_UNFREEZE, sdf);
+    *done = true;
+    *is_terminal = true;
+    return;
+  }
+
+  if (!dir->is_auth()) { // && dir->is_subtree_root()) {
     dout(20) << __func__ << " subtree boundary at " << *dir << dendl;
     string path;
     if (dir->inode->is_root()) {
@@ -311,10 +344,10 @@ void ScrubStack::scrub_dirfrag(CDir *dir,
       dir->inode->make_path_string(path);
     }
     MMDSScrubPath *msg = new MMDSScrubPath(path, header);
-    dout(20) << __func__ << " sending to " << dir->get_dir_auth().first
+    dout(20) << __func__ << " sending to " << dir->authority().first
 	     << dendl;
     dir->scrub_initialize(header);
-    mdcache->mds->send_message_mds(msg, dir->get_dir_auth().first);
+    mdcache->mds->send_message_mds(msg, dir->authority().first);
     dir->scrub_finished();
     *done = true;
     *is_terminal = true;

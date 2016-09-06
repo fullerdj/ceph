@@ -64,6 +64,9 @@ protected:
     const std::pair<const Key,T>* operator->() {
       return it.operator->();
     }
+    const std::pair<const Key,T>* operator*() {
+return it.operator*();
+    }
   };
   template <class It>
   class iterator_base {
@@ -105,6 +108,9 @@ protected:
     }
     std::pair<const Key,T>* operator->() {
       return it.operator->();
+    }
+    std::pair<const Key, T>& operator*() {
+      return it.operator*();
     }
     operator const_iterator_base<It>() const {
       return const_iterator_base<It>(map, it);

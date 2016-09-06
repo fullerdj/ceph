@@ -225,6 +225,10 @@ bool CDir::check_rstats(bool scrub)
 
   dout(25) << "check_rstats on " << this << dendl;
   if (!is_complete() || !is_auth() || is_frozen()) {
+    dout(10) << this << " complete: " << is_complete()
+	     << " auth: " << is_auth()
+	     << " frozen: " << is_frozen()
+	     << " auth pin: " << is_auth_pinned() << dendl;
     assert(!scrub);
     dout(10) << "check_rstats bailing out -- incomplete or non-auth or frozen dir!" << dendl;
     return true;
@@ -2938,8 +2942,11 @@ void CDir::scrub_initialize(const ScrubHeaderRefConst& header)
 
   // FIXME: weird implicit construction, is someone else meant
   // to be calling scrub_info_create first?
+  if (!scrub_infop) /* XXX */
+    dout(20) << "someone is scrubbing " << this << dendl;
   scrub_info();
-  assert(scrub_infop && !scrub_infop->directory_scrubbing);
+  assert(scrub_infop);// && !scrub_infop->directory_scrubbing);
+  assert(is_auth() || !scrub_infop->directory_scrubbing);
 
   scrub_infop->recursive_start.version = get_projected_version();
   scrub_infop->recursive_start.time = ceph_clock_now(g_ceph_context);
@@ -2952,6 +2959,7 @@ void CDir::scrub_initialize(const ScrubHeaderRefConst& header)
   scrub_infop->others_scrubbed.clear();
 
   if (is_auth()) {
+//    auth_pin(scrub_infop);
     for (map_t::iterator i = items.begin();
 	 i != items.end();
 	 ++i) {
@@ -2989,6 +2997,8 @@ void CDir::scrub_finished()
 
   scrub_infop->last_recursive = scrub_infop->recursive_start;
   scrub_infop->last_scrub_dirty = true;
+
+  //if (is_auth()) auth_unpin(scrub_infop);
 }
 
 int CDir::_next_dentry_on_set(set<dentry_key_t>& dns, bool missing_okay,

@@ -27,6 +27,7 @@ class MDCache;
 class Finisher;
 
 class ScrubStack {
+  friend class C_MDS_ScrubDirfrag;
 protected:
   /// A finisher needed so that we don't re-enter kick_off_scrubs
   Finisher *finisher;
