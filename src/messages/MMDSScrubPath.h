@@ -28,12 +28,12 @@ class MMDSScrubPath : public Message {
 
   MMDSScrubPath() : Message(MSG_MDS_SCRUBPATH) {}
   MMDSScrubPath(const std::string& _path, ScrubHeaderRefConst header)
-    : Message(MSG_MDS_SCRUBPATH) {
-    path = _path;
-    tag = header->tag;
-    force = header->force;
-    repair = header->repair;
-  }
+    : Message(MSG_MDS_SCRUBPATH), path(_path), tag (header->tag),
+      force(header->force), repair(header->repair) {}
+  MMDSScrubPath(const std::string& _path, std::string _tag, bool _force,
+		bool _repair)
+    : Message(MSG_MDS_SCRUBPATH), path(_path), tag(_tag), force(_force),
+      repair(_repair) {}
 private:
   ~MMDSScrubPath() {}
 

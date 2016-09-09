@@ -1156,6 +1156,7 @@ private:
                             int rval, int stage);
   friend class ValidationContinuation;
   /** @} Scrubbing and fsck */
+  /* XXX */ friend ostream& operator<<(ostream& out, const CInode& in);
 };
 
 ostream& operator<<(ostream& out, const CInode::scrub_stamp_info_t& si);

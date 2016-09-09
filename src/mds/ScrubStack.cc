@@ -86,12 +86,29 @@ void ScrubStack::kick_off_scrubs()
               "progress and " << stack_size << " in the stack" << dendl;
   bool can_continue = true;
   elist<CInode*>::iterator i = inode_stack.begin();
+
   while (g_conf->mds_max_scrub_ops_in_progress > scrubs_in_progress &&
       can_continue && !i.end()) {
     CInode *curi = *i;
     ++i; // we have our reference, push iterator forward
 
     dout(20) << __func__ << " examining " << *curi << dendl;
+    if (!curi->is_auth()) {
+      dout(20) << __func__ << " popped rep inode at " << *curi << dendl;
+      string path;
+      if (curi->is_root()) {
+	path = "/";
+      } else {
+	curi->make_path_string(path);
+      }
+      MMDSScrubPath *msg = new MMDSScrubPath(path, curi->scrub_info()->header);
+      dout(20) << __func__ << " sending to " << curi->authority().first
+	       << dendl;
+      mdcache->mds->send_message_mds(msg, curi->authority().first);
+      pop_inode(curi);
+      can_continue = true;
+      continue;
+    }
 
     if (!curi->is_dir()) {
       // it's a regular file, symlink, or hard link
@@ -321,8 +338,10 @@ void ScrubStack::scrub_dirfrag(CDir *dir,
     dout(20) << "scrub: ambiguous: " << *dir << dendl;
     C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(this, dir, header);
     dir->add_waiter(CDir::WAIT_SINGLEAUTH, sdf);
+    /*
     *done = true;
     *is_terminal = true;
+    */
     return;
   }
 
@@ -330,8 +349,10 @@ void ScrubStack::scrub_dirfrag(CDir *dir,
     dout(20) << "scrub: frozen: " << *dir << dendl;
     C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(this, dir, header);
     dir->add_waiter(CDir::WAIT_UNFREEZE, sdf);
+    /*
     *done = true;
     *is_terminal = true;
+    */
     return;
   }
 

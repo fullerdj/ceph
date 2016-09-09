@@ -11849,9 +11849,13 @@ public:
 
   void finish(int r) {
     if (r < 0) { // we failed the lookup or something; dump ourselves
-      formatter->open_object_section("results");
-      formatter->dump_int("return_code", r);
-      formatter->close_section(); // results
+      if (formatter) {
+	formatter->open_object_section("results");
+	formatter->dump_int("return_code", r);
+	formatter->close_section(); // results
+      } else {
+	/* XXX */
+      }
     }
     if (on_finish)
       on_finish->complete(r);

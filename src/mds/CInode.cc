@@ -248,6 +248,14 @@ ostream& operator<<(ostream& out, const CInode& in)
 
   out << " " << &in;
   out << "]";
+
+  if (in.scrub_infop) {
+    out << " scrubbing ";
+    if (in.scrub_infop->header) {
+      out << " with header " << in.scrub_infop->header;
+    }
+  }
+
   return out;
 }
 
@@ -3774,6 +3782,14 @@ void CInode::validate_disk_state(CInode::validated_data *results,
       C_OnFinisher *conf = new C_OnFinisher(get_io_callback(BACKTRACE),
                                             in->mdcache->mds->finisher);
 
+      MDCache *mdcache = in->mdcache;
+      inode_t &inode = in->inode;
+      dout(20) << "looking at " << *in << " with info " << in->scrub_infop
+	       << dendl;
+
+		  if (in->scrub_infop)
+		    dout(20) << " and header " << dendl;
+
       // Whether we have a tag to apply depends on ScrubHeader (if one is
       // present)
       if (in->scrub_infop && in->scrub_infop->header) {
@@ -3899,6 +3915,8 @@ next:
     }
 
     bool _inode_disk(int rval) {
+      LogChannelRef clog = in->mdcache->mds->clog;
+      clog->error() << "inode_disk: results = " << results << " on " << *in;
       results->inode.checked = true;
       results->inode.ondisk_read_retval = rval;
       results->inode.ondisk_value = shadow_in->inode;
@@ -3940,7 +3958,10 @@ next:
 	  dir->scrub_infop->header = in->scrub_infop->header;
         if (dir->is_complete()) {
 	  if (dir->is_frozen()) {
-	    dir->add_waiter(WAIT_UNFREEZE, get_internal_callback(INODE));
+	    LogChannelRef clog = in->mdcache->mds->clog;
+	    clog->error() << "frozen: " << *dir << " calling back for "
+		     << *in;
+	    dir->add_waiter(WAIT_UNFREEZE, get_internal_callback(BACKTRACE));
 	    return false;
 	  }
 	  dir->scrub_local();
@@ -4224,6 +4245,11 @@ void CInode::scrub_initialize(CDentry *scrub_parent,
   if (!scrub_infop)
     scrub_infop = new scrub_info_t();
 
+  if (is_dir() && is_auth()) {
+    dout(20) << "++++++++ pinning " << *this << dendl;
+    auth_pin(scrub_infop);
+  }
+
   if (get_projected_inode()->is_dir()) {
     // fill in dirfrag_stamps with initial state
     std::list<frag_t> frags;
@@ -4231,13 +4257,16 @@ void CInode::scrub_initialize(CDentry *scrub_parent,
     for (std::list<frag_t>::iterator i = frags.begin();
         i != frags.end();
         ++i) {
+      dout(20) << "initializing map for " << *i << dendl;
       if (header->force)
 	scrub_infop->dirfrag_stamps[*i].reset();
       else
 	scrub_infop->dirfrag_stamps[*i];
+      /*
       CDir *dir = get_dirfrag(*i);
-      if (dir->is_auth())
+      if (dir && dir->is_auth())
 	dir->auth_pin(scrub_infop);
+      */
     }
   }
 
@@ -4342,18 +4371,20 @@ void CInode::scrub_finished(MDSInternalContextBase **c) {
     dn->put(CDentry::PIN_SCRUBPARENT);
   }
 
+  if (is_dir() && is_auth()) {
+    dout(20) << "-------- unpinning " << *this << dendl;
+    auth_unpin(scrub_infop);
+  }
+
+  /*
   if (is_dir()) { 
-    /*
-    for (compact_map<frag_t,CDir*>::iterator p = dirfrags.begin();
-	 p != dirfrags.end();
-	 ++p) {
-    */
     for (auto& p : dirfrags) {
-      if (p->second->is_auth()) {
-	p->second->auth_unpin(scrub_infop);
+      if (p.second->is_auth()) {
+	p.second->auth_unpin(scrub_infop);
       }
     }
   }
+  */
 
   *c = scrub_infop->on_finish;
   scrub_infop->on_finish = NULL;

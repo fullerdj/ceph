@@ -2959,7 +2959,7 @@ void CDir::scrub_initialize(const ScrubHeaderRefConst& header)
   scrub_infop->others_scrubbed.clear();
 
   if (is_auth()) {
-//    auth_pin(scrub_infop);
+    auth_pin(scrub_infop); /* XXX XXX */
     for (map_t::iterator i = items.begin();
 	 i != items.end();
 	 ++i) {
