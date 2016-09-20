@@ -21,18 +21,18 @@
 
 class MMDSScrubPath : public Message {
  public:  
-  std::string path;
+  dirfrag_t dirfrag;
   std::string tag;
   bool force;
   bool repair;
 
   MMDSScrubPath() : Message(MSG_MDS_SCRUBPATH) {}
-  MMDSScrubPath(const std::string& _path, ScrubHeaderRefConst header)
-    : Message(MSG_MDS_SCRUBPATH), path(_path), tag (header->tag),
+  MMDSScrubPath(dirfrag_t _dirfrag, ScrubHeaderRefConst header)
+    : Message(MSG_MDS_SCRUBPATH), dirfrag(_dirfrag), tag (header->tag),
       force(header->force), repair(header->repair) {}
-  MMDSScrubPath(const std::string& _path, std::string _tag, bool _force,
+  MMDSScrubPath(dirfrag_t _dirfrag, std::string _tag, bool _force,
 		bool _repair)
-    : Message(MSG_MDS_SCRUBPATH), path(_path), tag(_tag), force(_force),
+    : Message(MSG_MDS_SCRUBPATH), dirfrag(_dirfrag), tag(_tag), force(_force),
       repair(_repair) {}
 private:
   ~MMDSScrubPath() {}
@@ -40,19 +40,19 @@ private:
 public:
   const char *get_type_name() const { return "Sc"; }
   void print(ostream& o) const {
-    o << "scrub(" << path << " tag " << tag << " force=" << force
+    o << "scrub(" << dirfrag << " tag " << tag << " force=" << force
       << " repair=" << repair << ")";
   }
 
   void encode_payload(uint64_t features) {
-    ::encode(path, payload);
+    ::encode(dirfrag, payload);
     ::encode(tag, payload);
     ::encode(force, payload);
     ::encode(repair, payload);
   }
   void decode_payload() {
     bufferlist::iterator p = payload.begin();
-    ::decode(path, p);
+    ::decode(dirfrag, p);
     ::decode(tag, p);
     ::decode(force, p);
     ::decode(repair, p);

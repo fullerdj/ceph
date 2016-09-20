@@ -256,6 +256,8 @@ public:
     bool last_scrub_dirty; /// is scrub info dirty or is it flushed to fnode?
     bool pending_scrub_error;
 
+    bool needs_reset;
+
     /// these are lists of children in each stage of scrubbing
     set<dentry_key_t> directories_to_scrub;
     set<dentry_key_t> directories_scrubbing;
@@ -270,7 +272,8 @@ public:
       directory_scrubbing(false),
       need_scrub_local(false),
       last_scrub_dirty(false),
-      pending_scrub_error(false) {}
+      pending_scrub_error(false),
+      needs_reset(false) {}
   };
   /**
    * Call to start this CDir on a new scrub.
@@ -307,6 +310,7 @@ public:
    * @param dn The CDentry which has been scrubbed.
    */
   void scrub_dentry_finished(CDentry *dn);
+  void scrub_remove_dentries();
   /**
    * Call this once all CDentries have been scrubbed, according to
    * scrub_dentry_next's listing. It finalizes the scrub statistics.
@@ -318,6 +322,21 @@ public:
    * @returns true if the rstats and directory contents match, false otherwise.
    */
   bool scrub_local();
+  bool is_scrubbing() {
+    return scrub_infop && scrub_infop->directory_scrubbing;
+  }
+  bool needs_scrub_reset() {
+    if (!scrub_infop) {
+      return false;
+    }
+    return scrub_infop->needs_reset;
+  }
+  void set_scrub_reset() {
+    if (scrub_infop) {
+      scrub_infop->needs_reset = true;
+    }
+  }
+  void scrub_reset();
 private:
   /**
    * Create a scrub_info_t struct for the scrub_infop pointer.

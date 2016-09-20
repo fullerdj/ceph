@@ -66,7 +66,12 @@ void ScrubStack::_enqueue_inode(CInode *in, CDentry *parent,
   dout(10) << __func__ << " with {" << *in << "}"
            << ", on_finish=" << on_finish << ", top=" << top << dendl;
   assert(mdcache->mds->mds_lock.is_locked_by_me());
-  in->scrub_initialize(parent, header, on_finish);
+  if (!in->scrub_is_in_progress()) {
+    in->scrub_initialize(parent, header, on_finish);
+  } else if (in->scrub_info()->scrub_parent == NULL && parent) {
+    in->scrub_info()->scrub_parent = parent;
+    parent->get(CDentry::PIN_SCRUBPARENT);
+  }
   if (top)
     push_inode(in);
   else
@@ -94,20 +99,40 @@ void ScrubStack::kick_off_scrubs()
 
     dout(20) << __func__ << " examining " << *curi << dendl;
     if (!curi->is_auth()) {
-      dout(20) << __func__ << " popped rep inode at " << *curi << dendl;
-      string path;
-      if (curi->is_root()) {
-	path = "/";
+      if (curi->is_dir()) { 
+	dout(20) << __func__ << " popped rep dir " << *curi << dendl;
+	list<CDir*> dirfrags;
+	curi->get_dirfrags(dirfrags);
+	if (dirfrags.empty()) { /* XXX WTF? */
+	  dout(20) << __func__ << " no dirfrags?" << dendl;
+	  MMDSScrubPath *msg = new MMDSScrubPath(dirfrag_t(curi->ino(),
+							   frag_t()),
+						 curi->scrub_info()->header);
+	  dout(20) << __func__ << " sending to " << curi->authority().first
+		   << dendl;
+	  mdcache->mds->send_message_mds(msg, curi->authority().first);
+	} else {
+	  for (auto j : dirfrags) {
+	    MMDSScrubPath *msg = new MMDSScrubPath(j->dirfrag(),
+						   curi->scrub_info()->header);
+	    dout(20) << __func__ << " sending to " << j->authority().first
+		     << dendl;
+	    mdcache->mds->send_message_mds(msg, j->authority().first);
+	  }
+	}
+	if (curi->scrub_is_in_progress()) {
+	  MDSInternalContextBase *c = NULL;
+	  curi->scrub_finished(&c);
+	  if (c) {
+	    finisher->queue(new MDSIOContextWrapper(mdcache->mds, c), 0);
+	  }
+	}
+	pop_inode(curi);
+	can_continue = true;
+	continue;
       } else {
-	curi->make_path_string(path);
+	dout(20) << __func__ << " popped rep inode at " << *curi << dendl;
       }
-      MMDSScrubPath *msg = new MMDSScrubPath(path, curi->scrub_info()->header);
-      dout(20) << __func__ << " sending to " << curi->authority().first
-	       << dendl;
-      mdcache->mds->send_message_mds(msg, curi->authority().first);
-      pop_inode(curi);
-      can_continue = true;
-      continue;
     }
 
     if (!curi->is_dir()) {
@@ -133,7 +158,7 @@ void ScrubStack::kick_off_scrubs()
         // we added new stuff to top of stack, so reset ourselves there
         i = inode_stack.begin();
       } else {
-        dout(20) << __func__ << " dir no-op" << dendl;
+        dout(20) << __func__ << " dir no-op: " << *curi << dendl;
       }
 
       can_continue = progress || terminal || completed;
@@ -167,10 +192,19 @@ void ScrubStack::scrub_dir_inode(CInode *in,
       CDir *dir = in->get_dirfrag(*i);
 
       if (dir) {
+	if (dir->needs_scrub_reset()) {
+	  dir->scrub_reset();
+	}
 	scrubbing_cdirs.push_back(dir);
 	dout(25) << __func__ << " got CDir " << *dir << " presently scrubbing" << dendl;
       } else {
-	in->scrub_dirfrag_finished(*i);
+	if (in->scrub_is_in_progress()) {
+	  MDSInternalContextBase *c = NULL;
+	  in->scrub_finished(&c);
+	  if (c) {
+	    finisher->queue(new MDSIOContextWrapper(mdcache->mds, c), 0);
+	  }
+	}
 	dout(25) << __func__ << " missing dirfrag " << *i << " skip scrubbing" << dendl;
       }
     }
@@ -187,8 +221,11 @@ void ScrubStack::scrub_dir_inode(CInode *in,
 	++i;
 	dout(20) << __func__ << " got cur_dir = " << *cur_dir << dendl;
       } else {
-	bool ready = get_next_cdir(in, &cur_dir);
+	bool skip = false;
+	bool ready = get_next_cdir(in, &cur_dir, &skip);
 	dout(20) << __func__ << " get_next_cdir ready=" << ready << dendl;
+	dout(20) << __func__ << " get_next_cdir skip=" << skip << dendl;
+	if (skip) continue;
 
 	if (ready && cur_dir) {
 	  scrubbing_cdirs.push_back(cur_dir);
@@ -207,8 +244,8 @@ void ScrubStack::scrub_dir_inode(CInode *in,
       bool frag_terminal = true;
       bool frag_done = false;
       scrub_dirfrag(cur_dir, header,
-		    &frag_added_children, &frag_terminal, &frag_done);
-      if (frag_done) {
+		    &frag_added_children, &frag_terminal, &frag_done, false);
+      if (frag_done && cur_dir->inode->scrub_is_in_progress()) {
 	cur_dir->inode->scrub_dirfrag_finished(cur_dir->frag);
       }
       *added_children |= frag_added_children;
@@ -237,7 +274,7 @@ void ScrubStack::scrub_dir_inode(CInode *in,
   return;
 }
 
-bool ScrubStack::get_next_cdir(CInode *in, CDir **new_dir)
+bool ScrubStack::get_next_cdir(CInode *in, CDir **new_dir, bool *skip)
 {
   dout(20) << __func__ << " on " << *in << dendl;
   frag_t next_frag;
@@ -247,13 +284,31 @@ bool ScrubStack::get_next_cdir(CInode *in, CDir **new_dir)
   if (r == 0) {
     // we got a frag to scrub, otherwise it would be ENOENT
     dout(25) << "looking up new frag " << next_frag << dendl;
+    if (!in->is_auth()) {
+      MMDSScrubPath *msg = new MMDSScrubPath(dirfrag_t(in->ino(), next_frag),
+					     in->scrub_info()->header);
+      dout(20) << __func__ << " lost auth for " << *in << ", sending to "
+	       << in->authority().first << dendl;
+      mdcache->mds->send_message_mds(msg, in->authority().first);
+      *skip = true;
+      return true;
+    }
     CDir *next_dir = in->get_or_open_dirfrag(mdcache, next_frag);
     if (!next_dir->is_complete() && next_dir->is_auth()) {
       scrubs_in_progress++;
       next_dir->fetch(&scrub_kick);
       dout(25) << "fetching frag from RADOS" << dendl;
       return false;
+    } else if (!next_dir->is_auth()) {
+      MMDSScrubPath *msg = new MMDSScrubPath(next_dir->dirfrag(),
+					     in->scrub_info()->header);
+      dout(20) << __func__ << " sending to " << next_dir->authority().first
+	       << dendl;
+      mdcache->mds->send_message_mds(msg, next_dir->authority().first);
+      *skip = true;
+      return true;
     }
+      
     *new_dir = next_dir;
     dout(25) << "returning dir " << *new_dir << dendl;
     return true;
@@ -310,25 +365,76 @@ void ScrubStack::scrub_dir_inode_final(CInode *in)
 class C_MDS_ScrubDirfrag : public MDSInternalContext {
 protected:
   ScrubStack* ss;
-  CDir *dir;
-  const ScrubHeaderRefConst &header;
+  dirfrag_t fg;
+  ScrubHeaderRefConst header;
+  bool frob;
 
 public:
-  C_MDS_ScrubDirfrag (ScrubStack* _ss, CDir *_dir, const ScrubHeaderRefConst &_header) : MDSInternalContext(_ss->mdcache->mds), ss(_ss), dir(_dir), header(_header) {}
+  C_MDS_ScrubDirfrag (ScrubStack* _ss, dirfrag_t _fg,
+		      ScrubHeaderRefConst _header, bool _frob)
+    : MDSInternalContext(_ss->mdcache->mds), ss(_ss), fg(_fg),
+      header(_header), frob(_frob) {}
 
   void finish (int r) {
-    bool foo, bar, baz;
-    ss->scrub_dirfrag(dir, header, &foo, &bar, &baz);
+    bool added_children, is_terminal, done;
+    CDir *dir = mds->mdcache->get_dirfrag(fg);
+    if (!dir) {
+      if (!ss->mdcache->have_inode(fg.ino)) {
+	C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(ss, fg, header, true);
+	ss->mdcache->open_ino(fg.ino, 0, sdf);
+      } else {
+	CInode *ino = ss->mdcache->get_inode(fg.ino);
+	assert(ino);
+	assert(ino->is_dir());
+	LogChannelRef clog = ss->mdcache->mds->clog;
+	clog->info() << "got : " << *ino;
+	if (!ino->is_auth()) {
+	  MMDSScrubPath *msg = new MMDSScrubPath(fg, header);
+	  clog->info() << "sending to " << ino->authority().first;
+	  mds->send_message_mds(msg, ino->authority().first);
+	  MDSInternalContextBase *c = NULL;
+	  if (ino->scrub_is_in_progress()) {
+	    ino->scrub_finished(&c);
+	  }
+	  if (c) {
+	    ss->finisher->queue(new MDSIOContextWrapper(mds, c), 0);
+	  }
+	} else {
+	  dir = ino->get_dirfrag(fg.frag);
+	  assert(dir);
+	}
+      }
+      ss->kick_off_scrubs();
+      return;
+    }
+    ss->scrub_dirfrag(dir, header, &added_children, &is_terminal, &done, frob);
+    if (dir->is_auth() && is_terminal && done) {
+      dir->scrub_initialize(header);
+      ss->scrub_dir_inode_final(dir->get_inode());
+    } else {
+      if (dir->is_auth() && !dir->get_inode()->scrub_is_in_progress()) {
+	dir->get_inode()->scrub_initialize(NULL, header, NULL);
+      }
+      if (dir->is_auth()) {
+	ss->push_inode_bottom(dir->get_inode());
+      } else if (dir->is_scrubbing()) {
+	dir->scrub_finished();
+      }
+      ss->scrubs_in_progress--;
+    }
+    ss->kick_off_scrubs();
   }
 };
     
 void ScrubStack::scrub_dirfrag(CDir *dir,
 			       const ScrubHeaderRefConst& header,
 			       bool *added_children, bool *is_terminal,
-			       bool *done)
+			       bool *done, bool frob)
 {
   assert(dir != NULL);
 
+  dout(20) << __func__ << " " << dir << dendl;
+  dout(20) << dir->authority() << dendl;
   dout(20) << __func__ << " on " << *dir << dendl;
   *added_children = false;
   *is_terminal = false;
@@ -336,8 +442,12 @@ void ScrubStack::scrub_dirfrag(CDir *dir,
 
   if (dir->is_ambiguous_auth()) {
     dout(20) << "scrub: ambiguous: " << *dir << dendl;
-    C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(this, dir, header);
+    C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(this, dir->dirfrag(),
+						     header, true);
+    dir->scrub_remove_dentries();
+    dir->scrub_reset();
     dir->add_waiter(CDir::WAIT_SINGLEAUTH, sdf);
+    if (!frob) pop_inode(dir->inode);
     /*
     *done = true;
     *is_terminal = true;
@@ -347,8 +457,12 @@ void ScrubStack::scrub_dirfrag(CDir *dir,
 
   if (dir->is_frozen()) {
     dout(20) << "scrub: frozen: " << *dir << dendl;
-    C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(this, dir, header);
+    C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(this, dir->dirfrag(),
+						     header, true);
+    dir->scrub_remove_dentries();
+    dir->scrub_reset();
     dir->add_waiter(CDir::WAIT_UNFREEZE, sdf);
+    if (!frob) pop_inode(dir->inode);
     /*
     *done = true;
     *is_terminal = true;
@@ -356,20 +470,31 @@ void ScrubStack::scrub_dirfrag(CDir *dir,
     return;
   }
 
-  if (!dir->is_auth()) { // && dir->is_subtree_root()) {
+  if (!dir->is_auth()) {
     dout(20) << __func__ << " subtree boundary at " << *dir << dendl;
-    string path;
-    if (dir->inode->is_root()) {
-      path = "/";
-    } else {
-      dir->inode->make_path_string(path);
-    }
-    MMDSScrubPath *msg = new MMDSScrubPath(path, header);
+    MMDSScrubPath *msg = new MMDSScrubPath(dir->dirfrag(), header);
     dout(20) << __func__ << " sending to " << dir->authority().first
 	     << dendl;
-    dir->scrub_initialize(header);
+    if (!dir->is_scrubbing()) {
+      dir->scrub_initialize(header);
+    }
+    if (!dir->get_inode()->scrub_is_in_progress()) {
+      dir->get_inode()->scrub_initialize(NULL, header, NULL);
+    }
+    dir->scrub_remove_dentries();
     mdcache->mds->send_message_mds(msg, dir->authority().first);
-    dir->scrub_finished();
+    {
+      MDSInternalContextBase *c = NULL;
+      if (dir->inode->scrub_is_in_progress()) {
+	dir->inode->scrub_finished(&c);
+      } else {
+	dout(20) << __func__ << " no scrub on " << dir->inode << dendl;
+      }
+      //dir->scrub_finished();
+      if (c) {
+	finisher->queue(new MDSIOContextWrapper(mdcache->mds, c), 0);
+      }
+    }
     *done = true;
     *is_terminal = true;
     return;
@@ -381,7 +506,14 @@ void ScrubStack::scrub_dirfrag(CDir *dir,
     // of dentries.
     if (!dir->is_complete()) {
       scrubs_in_progress++;
-      dir->fetch(&scrub_kick);
+      if (frob) {
+	dout(20) << "need fetch, header " << header->tag << dendl;
+	C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(this, dir->dirfrag(),
+							 header, frob);
+	dir->fetch(sdf);
+      } else {
+	dir->fetch(&scrub_kick);
+      }
       return;
     }
 
@@ -392,7 +524,13 @@ void ScrubStack::scrub_dirfrag(CDir *dir,
   while(r == 0) {
     CDentry *dn = NULL;
     scrubs_in_progress++;
-    r = dir->scrub_dentry_next(&scrub_kick, &dn);
+    if (frob) {
+      C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(this, dir->dirfrag(),
+						       header, frob);
+      r = dir->scrub_dentry_next(sdf, &dn);
+    } else {
+      r = dir->scrub_dentry_next(&scrub_kick, &dn);
+    }
     if (r != EAGAIN) {
       scrubs_in_progress--;
     }
@@ -415,7 +553,20 @@ void ScrubStack::scrub_dirfrag(CDir *dir,
         *is_terminal = true;
       } else {
         dout(20) << __func__ << " " << scrubbing.size() << " dentries still "
-                   "scrubbing in " << *dir << dendl;
+	  "scrubbing in " << *dir << dendl;
+	bool changed = false;
+	for (auto i : scrubbing) {
+	  // check scrubstack for descendents and reorder if needed
+	  dout(20) << *i << dendl;
+	  CInode *in = i->get_projected_inode();
+	  if (dir->get_inode()->item_scrub.is_on_list() &&
+	      in->item_scrub.is_on_list()) {
+	    pop_inode(in);
+	    push_inode(in);
+	    changed = true;
+	  }
+	}
+	if (changed) kick_off_scrubs();
       }
       return;
     }
@@ -452,7 +603,9 @@ void ScrubStack::_validate_inode_done(CInode *in, int r,
   const ScrubHeaderRefConst header = in->scrub_info()->header;
 
   MDSInternalContextBase *c = NULL;
-  in->scrub_finished(&c);
+  if (in->scrub_is_in_progress()) {
+    in->scrub_finished(&c);
+  }
 
   if (!header->recursive && in == header->origin) {
     if (r >= 0) { // we got into the scrubbing dump it

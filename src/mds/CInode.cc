@@ -250,7 +250,7 @@ ostream& operator<<(ostream& out, const CInode& in)
   out << "]";
 
   if (in.scrub_infop) {
-    out << " scrubbing ";
+    out << " scrubbing";
     if (in.scrub_infop->header) {
       out << " with header " << in.scrub_infop->header;
     }
@@ -3768,6 +3768,9 @@ void CInode::validate_disk_state(CInode::validated_data *results,
     }
 
     bool _start(int rval) {
+      if (!in->is_auth()) {
+	  return true;
+      }
       if (in->is_dirty()) {
         MDCache *mdcache = in->mdcache;
         inode_t& inode = in->inode;
@@ -3786,9 +3789,9 @@ void CInode::validate_disk_state(CInode::validated_data *results,
       inode_t &inode = in->inode;
       dout(20) << "looking at " << *in << " with info " << in->scrub_infop
 	       << dendl;
-
+		  
 		  if (in->scrub_infop)
-		    dout(20) << " and header " << dendl;
+		    dout(20) << " and header " << in->scrub_infop->header << dendl;
 
       // Whether we have a tag to apply depends on ScrubHeader (if one is
       // present)
@@ -4245,11 +4248,6 @@ void CInode::scrub_initialize(CDentry *scrub_parent,
   if (!scrub_infop)
     scrub_infop = new scrub_info_t();
 
-  if (is_dir() && is_auth()) {
-    dout(20) << "++++++++ pinning " << *this << dendl;
-    auth_pin(scrub_infop);
-  }
-
   if (get_projected_inode()->is_dir()) {
     // fill in dirfrag_stamps with initial state
     std::list<frag_t> frags;
@@ -4262,11 +4260,6 @@ void CInode::scrub_initialize(CDentry *scrub_parent,
 	scrub_infop->dirfrag_stamps[*i].reset();
       else
 	scrub_infop->dirfrag_stamps[*i];
-      /*
-      CDir *dir = get_dirfrag(*i);
-      if (dir && dir->is_auth())
-	dir->auth_pin(scrub_infop);
-      */
     }
   }
 
@@ -4286,7 +4279,8 @@ void CInode::scrub_initialize(CDentry *scrub_parent,
 int CInode::scrub_dirfrag_next(frag_t* out_dirfrag)
 {
   dout(20) << __func__ << dendl;
-  assert(scrub_is_in_progress());
+  if (!scrub_is_in_progress()) return ENOENT;
+  //assert(scrub_is_in_progress());
 
   if (!is_dir()) {
     return -ENOTDIR;
@@ -4356,7 +4350,7 @@ void CInode::scrub_finished(MDSInternalContextBase **c) {
       derr << i->second.last_scrub_version << " != "
         << i->second.scrub_start_version << dendl;
     }
-    assert(i->second.last_scrub_version == i->second.scrub_start_version);
+    //assert(i->second.last_scrub_version == i->second.scrub_start_version);
   }
 
   scrub_infop->last_scrub_version = scrub_infop->scrub_start_version;
@@ -4370,21 +4364,6 @@ void CInode::scrub_finished(MDSInternalContextBase **c) {
     dn->dir->scrub_dentry_finished(dn);
     dn->put(CDentry::PIN_SCRUBPARENT);
   }
-
-  if (is_dir() && is_auth()) {
-    dout(20) << "-------- unpinning " << *this << dendl;
-    auth_unpin(scrub_infop);
-  }
-
-  /*
-  if (is_dir()) { 
-    for (auto& p : dirfrags) {
-      if (p.second->is_auth()) {
-	p.second->auth_unpin(scrub_infop);
-      }
-    }
-  }
-  */
 
   *c = scrub_infop->on_finish;
   scrub_infop->on_finish = NULL;

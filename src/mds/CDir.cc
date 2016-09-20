@@ -27,6 +27,8 @@
 #include "MDLog.h"
 #include "LogSegment.h"
 
+#include "ScrubStack.h"
+
 #include "common/bloom_filter.hpp"
 #include "include/Context.h"
 #include "common/Clock.h"
@@ -2938,7 +2940,7 @@ void CDir::scrub_info_create() const
 void CDir::scrub_initialize(const ScrubHeaderRefConst& header)
 {
   dout(20) << __func__ << dendl;
-  assert(!is_auth() || is_complete());
+  /*assert(!is_auth() || is_complete());*/
 
   // FIXME: weird implicit construction, is someone else meant
   // to be calling scrub_info_create first?
@@ -2946,7 +2948,7 @@ void CDir::scrub_initialize(const ScrubHeaderRefConst& header)
     dout(20) << "someone is scrubbing " << this << dendl;
   scrub_info();
   assert(scrub_infop);// && !scrub_infop->directory_scrubbing);
-  assert(is_auth() || !scrub_infop->directory_scrubbing);
+  assert(/*is_auth() || */!scrub_infop->directory_scrubbing);
 
   scrub_infop->recursive_start.version = get_projected_version();
   scrub_infop->recursive_start.time = ceph_clock_now(g_ceph_context);
@@ -2959,7 +2961,7 @@ void CDir::scrub_initialize(const ScrubHeaderRefConst& header)
   scrub_infop->others_scrubbed.clear();
 
   if (is_auth()) {
-    auth_pin(scrub_infop); /* XXX XXX */
+    //auth_pin(scrub_infop); /* XXX XXX */
     for (map_t::iterator i = items.begin();
 	 i != items.end();
 	 ++i) {
@@ -2988,17 +2990,55 @@ void CDir::scrub_finished()
   assert(scrub_infop && scrub_infop->directory_scrubbing);
 
   assert(scrub_infop->directories_to_scrub.empty());
-  assert(scrub_infop->directories_scrubbing.empty());
+  // XXX assert(scrub_infop->directories_scrubbing.empty());
   scrub_infop->directories_scrubbed.clear();
   assert(scrub_infop->others_to_scrub.empty());
-  assert(scrub_infop->others_scrubbing.empty());
+  // XXX assert(scrub_infop->others_scrubbing.empty());
   scrub_infop->others_scrubbed.clear();
   scrub_infop->directory_scrubbing = false;
 
   scrub_infop->last_recursive = scrub_infop->recursive_start;
   scrub_infop->last_scrub_dirty = true;
+}
 
-  //if (is_auth()) auth_unpin(scrub_infop);
+void CDir::scrub_reset()
+{
+  dout(20) << __func__ << dendl;
+  if (!scrub_infop || !scrub_infop->directory_scrubbing) {
+    return;
+  }
+  scrub_infop->recursive_start.version = get_projected_version();
+  scrub_infop->recursive_start.time = ceph_clock_now(g_ceph_context);
+
+  scrub_infop->directories_to_scrub.clear();
+  scrub_infop->directories_scrubbing.clear();
+  scrub_infop->directories_scrubbed.clear();
+  scrub_infop->others_to_scrub.clear();
+  scrub_infop->others_scrubbing.clear();
+  scrub_infop->others_scrubbed.clear();
+
+  scrub_infop->needs_reset = false;
+
+  if (is_auth()) {
+    //auth_pin(scrub_infop); /* XXX XXX */
+    for (map_t::iterator i = items.begin();
+	 i != items.end();
+	 ++i) {
+      // TODO: handle snapshot scrubbing
+      if (i->first.snapid != CEPH_NOSNAP)
+	continue;
+
+      CDentry::linkage_t *dnl = i->second->get_projected_linkage();
+      if (dnl->is_primary()) {
+	if (dnl->get_inode()->is_dir())
+	  scrub_infop->directories_to_scrub.insert(i->first);
+	else
+	  scrub_infop->others_to_scrub.insert(i->first);
+      } else if (dnl->is_remote()) {
+	// TODO: check remote linkage
+      }
+    }
+  }
 }
 
 int CDir::_next_dentry_on_set(set<dentry_key_t>& dns, bool missing_okay,
@@ -3102,18 +3142,46 @@ void CDir::scrub_dentries_scrubbing(list<CDentry*> *out_dentries)
 void CDir::scrub_dentry_finished(CDentry *dn)
 {
   dout(20) << __func__ << " on dn " << *dn << dendl;
-  assert(scrub_infop && scrub_infop->directory_scrubbing);
+  /* XXX assert(scrub_infop && scrub_infop->directory_scrubbing); */
+  if (!scrub_infop || !scrub_infop->directory_scrubbing) {
+    return;
+  }
   dentry_key_t dn_key = dn->key();
   if (scrub_infop->directories_scrubbing.count(dn_key)) {
     scrub_infop->directories_scrubbing.erase(dn_key);
     scrub_infop->directories_scrubbed.insert(dn_key);
   } else {
+    /* XXX */ if (scrub_infop->others_scrubbing.count(dn_key) == 0) {
+      dout(20) << "reset race" << dendl;
+      return;
+    }
     assert(scrub_infop->others_scrubbing.count(dn_key));
     scrub_infop->others_scrubbing.erase(dn_key);
     scrub_infop->others_scrubbed.insert(dn_key);
   }
 }
 
+void CDir::scrub_remove_dentries() {
+  dout(20) << __func__ << dendl;
+  if (!scrub_infop) {
+    return;
+  }
+  set<dentry_key_t>& others = scrub_infop->others_scrubbing;
+  set<dentry_key_t>& directories = scrub_infop->directories_scrubbing;
+  scrub_infop->directories_to_scrub.clear();
+  scrub_infop->others_to_scrub.clear();
+  
+  for (auto i : items) {
+    if (others.find(i.first) != others.end() ||
+	directories.find(i.first) != directories.end()) {
+      CInode *target = i.second->get_projected_inode();
+      if (target->item_scrub.is_on_list()) {
+	cache->mds->scrubstack->pop_inode(target);
+      }
+    }
+  }
+}
+      
 void CDir::scrub_maybe_delete_info()
 {
   if (scrub_infop &&

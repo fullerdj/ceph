@@ -668,6 +668,7 @@ void Migrator::maybe_do_queued_export()
     CDir *dir = mds->mdcache->get_dirfrag(df);
     if (!dir) continue;
     if (!dir->is_auth()) continue;
+    if (dir->get_cum_auth_pins()) continue;
 
     dout(0) << "nicely exporting to mds." << dest << " " << *dir << dendl;
 
@@ -1224,6 +1225,9 @@ void Migrator::export_go_synced(CDir *dir, uint64_t tid)
 
   // set ambiguous auth
   cache->adjust_subtree_auth(dir, mds->get_nodeid(), it->second.peer);
+  if (dir->is_scrubbing()) {
+    dir->set_scrub_reset();
+  }
 
   // take away the popularity we're sending.
   utime_t now = ceph_clock_now(g_ceph_context);

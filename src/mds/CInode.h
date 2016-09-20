@@ -284,7 +284,8 @@ public:
 	children_scrubbed(false) {}
   };
 
-  const scrub_info_t *scrub_info() const{
+  //const scrub_info_t *scrub_info() const{
+  scrub_info_t *scrub_info() const{
     if (!scrub_infop)
       scrub_info_create();
     return scrub_infop;

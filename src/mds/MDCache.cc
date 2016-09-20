@@ -8620,7 +8620,7 @@ void MDCache::handle_scrub_path(MMDSScrubPath *m)
 {
   dout(10) << "handle_scrub_path " << *m << dendl;
 
-  enqueue_scrub(m->path, m->tag, m->force, true, m->repair, NULL, NULL);
+  enqueue_scrub_dirfrag(m->dirfrag, m->tag, m->force, m->repair);
 }
 
 void MDCache::kick_open_ino_peers(mds_rank_t who)
@@ -11901,6 +11901,7 @@ void MDCache::enqueue_scrub_work(MDRequestRef& mdr)
 
   // Cannot scrub same dentry twice at same time
   if (in->scrub_info()->scrub_in_progress) {
+    assert(1);
     mds->server->respond_to_request(mdr, -EBUSY);
     return;
   }
@@ -11918,6 +11919,119 @@ void MDCache::enqueue_scrub_work(MDRequestRef& mdr)
 
   mds->server->respond_to_request(mdr, 0);
   return;
+}
+
+class C_MDS_EnqueueScrubDirfrag : public MDSInternalContext {
+protected:
+  MDCache *mdc;
+  MDRequestRef mdr;
+  dirfrag_t fg;
+  const std::string tag;
+  bool force;
+  bool repair;
+
+public:
+  C_MDS_EnqueueScrubDirfrag (MDCache *_mdc, MDRequestRef _mdr, dirfrag_t _fg,
+			     const std::string _tag, bool _force, bool _repair)
+    : MDSInternalContext(_mdc->mds), mdc(_mdc), mdr(_mdr), fg(_fg), tag(_tag),
+      force(_force), repair(_repair) {}
+
+  void finish (int r) {
+    LogChannelRef clog = mds->clog;
+
+    clog->info() << "C_MDS_EnqueueScrubDirfrag: " << r;
+
+    CDir *target = mdc->get_dirfrag(fg);
+    if (!target) {
+      C_MDS_EnqueueScrubDirfrag *esdf = new C_MDS_EnqueueScrubDirfrag(mdc, mdr,
+								      fg, tag,
+								      force,
+								      repair);
+      if (!mdc->have_inode(fg.ino)) {
+	clog->info() << "C_MDS_EnqueueScrubDirfrag opening";
+	mdc->open_ino(fg.ino, 0, esdf);
+	return;
+      }
+
+      CInode *ino = mdc->get_inode(fg.ino);
+      assert(ino);
+      assert(ino->is_dir());
+      clog->info() << "C_MDS_EnqueueScrubDirfrag got: "  << *ino;
+
+      if (!ino->is_auth()) {
+	C_MDS_EnqueueScrub *cs = static_cast<C_MDS_EnqueueScrub *>(mdr->internal_op_finish);
+	MMDSScrubPath *msg = new MMDSScrubPath(fg,
+					       cs->header);
+	clog->info() << "C_MDS_EnqueueScrubDirfrag sending to "
+		     << ino->authority().first;
+	mds->send_message_mds(msg, ino->authority().first);
+	mds->server->respond_to_request(mdr, 0);
+	return;
+      }
+
+      target = ino->get_dirfrag(fg.frag);
+      assert(target);
+    }
+    mdc->enqueue_scrub_dirfrag(fg, tag, force, repair);
+    mds->server->respond_to_request(mdr, 0);
+  }
+};
+
+
+void MDCache::enqueue_scrub_dirfrag(dirfrag_t fg, const std::string &tag,
+				    bool force, bool repair)
+{
+  dout(10) << __func__ << " " << fg << dendl;
+  MDRequestRef mdr = request_start_internal(CEPH_MDS_OP_ENQUEUE_SCRUB);
+  CDir *target = get_dirfrag(fg);
+  filepath fp;
+
+  C_MDS_EnqueueScrub *cs = new C_MDS_EnqueueScrub(NULL, NULL);
+  ScrubHeaderRef &header = cs->header;
+  header->tag = tag;
+  header->force = force;
+  header->recursive = true;
+  header->repair = repair;
+  header->formatter = NULL;
+  mdr->internal_op_finish = cs;
+
+  if (!target) {
+    C_MDS_EnqueueScrubDirfrag *esdf = new C_MDS_EnqueueScrubDirfrag(this, mdr,
+								    fg, tag,
+								    force,
+								    repair);
+    open_ino(fg.ino, 0, esdf);
+    return;
+  }
+
+  target->inode->make_path(fp);
+  mdr->set_filepath(fp);
+
+  bool _added_children, _terminal;
+  bool done = false;
+  if (!target->inode->scrub_is_in_progress()) {
+    target->inode->scrub_initialize(NULL, header, NULL);
+  } else {
+    dout(20) << " already scrubbing " << *target->inode << dendl;
+    target->set_scrub_reset();
+    mds->server->respond_to_request(mdr, 0);
+    return;
+  }
+  mds->scrubstack->scrub_dirfrag(target, header, &_added_children,
+				 &_terminal, &done, true);
+  if (done) {
+    if (target->inode->scrub_is_in_progress()) {
+      MDSInternalContextBase *c = NULL;
+      target->inode->scrub_finished(&c);
+      if (c) {
+	mds->finisher->queue(new MDSIOContextWrapper(mds, c), 0);
+      }
+    }
+  } else if (target->is_auth() && !target->is_ambiguous_auth()) {
+    mds->scrubstack->enqueue_inode_bottom(target->inode, header, NULL);
+  }
+  mds->scrubstack->kick_off_scrubs();
+  mds->server->respond_to_request(mdr, 0);
 }
 
 struct C_MDC_RepairDirfragStats : public MDSInternalContext {

@@ -99,7 +99,9 @@ private:
    * Kick off as many scrubs as are appropriate, based on the current
    * state of the stack.
    */
+  /* XXX */ public:
   void kick_off_scrubs();
+  /* XXX */ private:
   /**
    * Push a indoe on top of the stack.
    */
@@ -111,7 +113,9 @@ private:
   /**
    * Pop the given inode off the stack.
    */
-  inline void pop_inode(CInode *in);
+  /* XXX */ public:
+  /*inline*/ void pop_inode(CInode *in);
+  /* XXX */ private:
 
   /**
    * Scrub a file inode.
@@ -165,8 +169,11 @@ private:
    * progress. Try again later.
    *
    */
+  /* XXX */ public:
   void scrub_dirfrag(CDir *dir, const ScrubHeaderRefConst& header,
-		     bool *added_children, bool *is_terminal, bool *done);
+		     bool *added_children, bool *is_terminal, bool *done,
+		     bool frob);
+  /* XXX */ private:
   /**
    * Scrub a directory-representing dentry.
    *
@@ -184,7 +191,7 @@ private:
    * @returns false if you have to wait, true if there's no work
    * left to do (we returned it, or there are none left in this inode).
    */
-  bool get_next_cdir(CInode *in, CDir **new_dir);
+  bool get_next_cdir(CInode *in, CDir **new_dir, bool *skip);
 
 };
 

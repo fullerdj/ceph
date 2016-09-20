@@ -1169,6 +1169,8 @@ public:
   void enqueue_scrub(const string& path, const std::string &tag,
                      bool force, bool recursive, bool repair,
 		     Formatter *f, Context *fin);
+  void enqueue_scrub_dirfrag(dirfrag_t fg, const std::string &tag,
+			     bool force, bool repair);
   void repair_inode_stats(CInode *diri);
   void repair_dirfrag_stats(CDir *dir);
 
