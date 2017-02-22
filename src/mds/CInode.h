@@ -276,7 +276,7 @@ public:
     /// my own (temporary) stamps and versions for each dirfrag we have
     std::map<frag_t, scrub_stamp_info_t> dirfrag_stamps;
 
-    ScrubHeaderRefConst header;
+    ScrubHeader header;
 
     scrub_info_t() : scrub_stamp_info_t(),
 	scrub_parent(NULL), on_finish(NULL),
@@ -303,7 +303,7 @@ public:
    * directory's get_projected_version())
    */
   void scrub_initialize(CDentry *scrub_parent,
-			const ScrubHeaderRefConst& header,
+			const ScrubHeader& header,
 			MDSInternalContextBase *f);
   /**
    * Get the next dirfrag to scrub. Gives you a frag_t in output param which

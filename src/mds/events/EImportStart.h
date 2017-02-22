@@ -28,6 +28,7 @@ class EImportStart : public LogEvent {
 protected:
   dirfrag_t base;
   vector<dirfrag_t> bounds;
+  bool scrub;
 
  public:
   EMetaBlob metablob;
@@ -37,7 +38,7 @@ protected:
   EImportStart(MDLog *log,
 	       dirfrag_t di,
 	       vector<dirfrag_t>& b) : LogEvent(EVENT_IMPORTSTART), 
-				       base(di), bounds(b),
+				       base(di), bounds(b), scrub(false),
 				       metablob(log) { }
   EImportStart() : LogEvent(EVENT_IMPORTSTART) { }
   
@@ -46,6 +47,7 @@ protected:
   }
 
   EMetaBlob *get_metablob() { return &metablob; }
+  void set_scrub(bool _s) { scrub = _s; }
   
   void encode(bufferlist &bl, uint64_t features) const;
   void decode(bufferlist::iterator &bl);

@@ -34,6 +34,7 @@
 
 #include "messages/MClientRequest.h"
 #include "messages/MMDSScrubPath.h"
+#include "messages/MMDSScrubComplete.h"
 #include "messages/MMDSSlaveRequest.h"
 
 class PerfCounters;
@@ -1170,11 +1171,13 @@ public:
                      bool force, bool recursive, bool repair,
 		     Formatter *f, Context *fin);
   void enqueue_scrub_dirfrag(dirfrag_t fg, const std::string &tag,
+			     utime_t time, inodeno_t root,
 			     bool force, bool repair);
   void repair_inode_stats(CInode *diri);
   void repair_dirfrag_stats(CDir *dir);
 
   void handle_scrub_path(MMDSScrubPath *m);
+  void handle_scrub_complete(MMDSScrubComplete *m);
 };
 
 class C_MDS_RetryRequest : public MDSInternalContext {

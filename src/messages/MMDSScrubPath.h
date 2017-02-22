@@ -22,18 +22,24 @@
 class MMDSScrubPath : public Message {
  public:  
   dirfrag_t dirfrag;
+  utime_t start;
+  inodeno_t root;
   std::string tag;
   bool force;
   bool repair;
 
   MMDSScrubPath() : Message(MSG_MDS_SCRUBPATH) {}
-  MMDSScrubPath(dirfrag_t _dirfrag, ScrubHeaderRefConst header)
-    : Message(MSG_MDS_SCRUBPATH), dirfrag(_dirfrag), tag (header->tag),
-      force(header->force), repair(header->repair) {}
+  MMDSScrubPath(dirfrag_t _dirfrag, ScrubHeader& header)
+    : Message(MSG_MDS_SCRUBPATH), dirfrag(_dirfrag),
+      start(header.start), root(header.oi),
+      tag(header.tag),
+      force(header.force), repair(header.repair) {}
+  /*
   MMDSScrubPath(dirfrag_t _dirfrag, std::string _tag, bool _force,
 		bool _repair)
     : Message(MSG_MDS_SCRUBPATH), dirfrag(_dirfrag), tag(_tag), force(_force),
       repair(_repair) {}
+  */
 private:
   ~MMDSScrubPath() {}
 
@@ -46,6 +52,8 @@ public:
 
   void encode_payload(uint64_t features) {
     ::encode(dirfrag, payload);
+    ::encode(start, payload);
+    ::encode(root, payload);
     ::encode(tag, payload);
     ::encode(force, payload);
     ::encode(repair, payload);
@@ -53,6 +61,8 @@ public:
   void decode_payload() {
     bufferlist::iterator p = payload.begin();
     ::decode(dirfrag, p);
+    ::decode(start, p);
+    ::decode(root, p);
     ::decode(tag, p);
     ::decode(force, p);
     ::decode(repair, p);

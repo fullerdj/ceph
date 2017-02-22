@@ -36,6 +36,9 @@ protected:
   elist<CInode*> inode_stack;
   /// current number of dentries we're actually scrubbing
   int scrubs_in_progress;
+public:
+  map<utime_t, ScrubHeader> scrub_ops;
+protected:
   ScrubStack *scrubstack; // hack for dout
   int stack_size;
 
@@ -74,14 +77,14 @@ public:
    * @param header The ScrubHeader propagated from whereever this scrub
    *               was initiated
    */
-  void enqueue_inode_top(CInode *in, const ScrubHeaderRefConst& header,
+  void enqueue_inode_top(CInode *in, const ScrubHeader& header,
 			 MDSInternalContextBase *on_finish) {
     enqueue_inode(in, header, on_finish, true);
   }
   /** Like enqueue_inode_top, but we wait for all pending scrubs before
    * starting this one.
    */
-  void enqueue_inode_bottom(CInode *in, const ScrubHeaderRefConst& header,
+  void enqueue_inode_bottom(CInode *in, const ScrubHeader& header,
 			    MDSInternalContextBase *on_finish) {
     enqueue_inode(in, header, on_finish, false);
   }
@@ -91,9 +94,9 @@ private:
    * Put the inode at either the top or bottom of the stack, with
    * the given scrub params, and then try and kick off more scrubbing.
    */
-  void enqueue_inode(CInode *in, const ScrubHeaderRefConst& header,
+  void enqueue_inode(CInode *in, const ScrubHeader& header,
                       MDSInternalContextBase *on_finish, bool top);
-  void _enqueue_inode(CInode *in, CDentry *parent, const ScrubHeaderRefConst& header,
+  void _enqueue_inode(CInode *in, CDentry *parent, const ScrubHeader& header,
                       MDSInternalContextBase *on_finish, bool top);
   /**
    * Kick off as many scrubs as are appropriate, based on the current
@@ -170,9 +173,10 @@ private:
    *
    */
   /* XXX */ public:
-  void scrub_dirfrag(CDir *dir, const ScrubHeaderRefConst& header,
+  void scrub_dirfrag(CDir *dir, ScrubHeader& header,
 		     bool *added_children, bool *is_terminal, bool *done,
 		     bool frob);
+  void scrub_complete(dirfrag_t df, nest_info_t rstat, utime_t start);
   /* XXX */ private:
   /**
    * Scrub a directory-representing dentry.

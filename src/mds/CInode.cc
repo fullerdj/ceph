@@ -251,8 +251,9 @@ ostream& operator<<(ostream& out, const CInode& in)
 
   if (in.scrub_infop) {
     out << " scrubbing";
-    if (in.scrub_infop->header) {
+    /*if (in.scrub_infop->header) */{
       out << " with header " << in.scrub_infop->header;
+      /* XXX */ out << " tag " << in.scrub_infop->header.tag;
     }
   }
 
@@ -3797,7 +3798,7 @@ void CInode::validate_disk_state(CInode::validated_data *results,
       // present)
       if (in->scrub_infop && in->scrub_infop->header) {
         // I'm a non-orphan, so look up my ScrubHeader via my linkage
-        const std::string &tag = in->scrub_infop->header->tag;
+        const std::string &tag = in->scrub_infop->header.tag;
         // Rather than using the usual CInode::fetch_backtrace,
         // use a special variant that optionally writes a tag in the same
         // operation.
@@ -3877,7 +3878,7 @@ next:
           clog->error() << "scrub: inode wrongly marked free: 0x" << std::hex
             << inode.ino;
 
-          if (in->scrub_infop->header && in->scrub_infop->header->repair) {
+          if (in->scrub_infop->header && in->scrub_infop->header.repair) {
             bool repaired = inotable->repair(inode.ino);
             if (repaired) {
               clog->error() << "inode table repaired for inode: 0x" << std::hex
@@ -3953,7 +3954,7 @@ next:
           p != frags.end();
           ++p) {
         CDir *dir = in->get_or_open_dirfrag(in->mdcache, *p);
-	if (in->scrub_infop && !dir->is_auth()) {
+	if (/*in->scrub_infop && */ !dir->is_auth()) {
 	  return immediate(DIRFRAGS, 0);
 	}
 	dir->scrub_info();
@@ -4010,7 +4011,7 @@ next:
 	    dir->scrub_infop->pending_scrub_error) {
 	  dir->scrub_infop->pending_scrub_error = false;
 	  if (dir->scrub_infop->header &&
-	      dir->scrub_infop->header->repair) {
+	      dir->scrub_infop->header.repair) {
 	    results->raw_stats.error_str
 	      << "dirfrag(" << p->first << ") has bad stats (will be fixed); ";
 	  } else {
@@ -4026,7 +4027,7 @@ next:
 	  !nest_info.same_sums(in->inode.rstat)) {
 	if (in->scrub_infop &&
 	    in->scrub_infop->header &&
-	    in->scrub_infop->header->repair) {
+	    in->scrub_infop->header.repair) {
 	  results->raw_stats.error_str
 	    << "freshly-calculated rstats don't match existing ones (will be fixed)";
 	  in->mdcache->repair_inode_stats(in);
@@ -4035,6 +4036,10 @@ next:
 	    << "freshly-calculated rstats don't match existing ones";
 	}
 	goto next;
+      }
+      {
+      LogChannelRef clog = in->mdcache->mds->clog;
+      clog->error() << "xxxx- " << *in << " " << nest_info << " " << in->inode.rstat;
       }
       if (frags_errors > 0)
 	goto next;
@@ -4239,7 +4244,7 @@ void CInode::scrub_maybe_delete_info()
 }
 
 void CInode::scrub_initialize(CDentry *scrub_parent,
-			      const ScrubHeaderRefConst& header,
+			      const ScrubHeader& header,
 			      MDSInternalContextBase *f)
 {
   dout(20) << __func__ << " with scrub_version " << get_version() << dendl;
@@ -4256,7 +4261,7 @@ void CInode::scrub_initialize(CDentry *scrub_parent,
         i != frags.end();
         ++i) {
       dout(20) << "initializing map for " << *i << dendl;
-      if (header->force)
+      if (header.force)
 	scrub_infop->dirfrag_stamps[*i].reset();
       else
 	scrub_infop->dirfrag_stamps[*i];
@@ -4368,10 +4373,10 @@ void CInode::scrub_finished(MDSInternalContextBase **c) {
   *c = scrub_infop->on_finish;
   scrub_infop->on_finish = NULL;
 
-  if (scrub_infop->header && scrub_infop->header->origin == this) {
+  if (scrub_infop->header && scrub_infop->header.origin == this) {
     // We are at the point that a tagging scrub was initiated
     LogChannelRef clog = mdcache->mds->clog;
-    clog->info() << "scrub complete with tag '" << scrub_infop->header->tag << "'";
+    clog->info() << "scrub complete with tag '" << scrub_infop->header.tag << "'";
   }
 }
 

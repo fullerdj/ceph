@@ -266,7 +266,7 @@ public:
     set<dentry_key_t> others_scrubbing;
     set<dentry_key_t> others_scrubbed;
 
-    ScrubHeaderRefConst header;
+    ScrubHeader header;
 
     scrub_info_t() :
       directory_scrubbing(false),
@@ -281,7 +281,7 @@ public:
    * @pre The CDir is marked complete.
    * @post It has set up its internal scrubbing state.
    */
-  void scrub_initialize(const ScrubHeaderRefConst& header);
+  void scrub_initialize(const ScrubHeader& header);
   /**
    * Get the next dentry to scrub. Gives you a CDentry* and its meaning. This
    * function will give you all directory-representing dentries before any
@@ -310,6 +310,7 @@ public:
    * @param dn The CDentry which has been scrubbed.
    */
   void scrub_dentry_finished(CDentry *dn);
+  void scrub_remove_files();
   void scrub_remove_dentries();
   /**
    * Call this once all CDentries have been scrubbed, according to
@@ -325,6 +326,9 @@ public:
   bool is_scrubbing() {
     return scrub_infop && scrub_infop->directory_scrubbing;
   }
+  bool is_scrub_queued() {
+    return inode->item_scrub.is_on_list();
+  }
   bool needs_scrub_reset() {
     if (!scrub_infop) {
       return false;
@@ -336,7 +340,16 @@ public:
       scrub_infop->needs_reset = true;
     }
   }
+
+  void set_scrub_start(bool _s) {
+    needs_scrub_start = _s;
+  }
+
+  bool need_scrub_start() {
+    return needs_scrub_start;
+  }
   void scrub_reset();
+  void scrub_abort();
 private:
   /**
    * Create a scrub_info_t struct for the scrub_infop pointer.
@@ -356,6 +369,7 @@ private:
 
 protected:
   scrub_info_t *scrub_infop;
+  bool needs_scrub_start;
 
   // contents of this directory
   map_t items;       // non-null AND null
@@ -425,7 +439,7 @@ protected:
     g_num_dirs++;
   }
 
-  const scrub_info_t *scrub_info() const {
+  scrub_info_t *scrub_info() const {
     if (!scrub_infop) {
       scrub_info_create();
     }

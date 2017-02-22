@@ -188,6 +188,7 @@ CDir::CDir(CInode *in, frag_t fg, MDCache *mdcache, bool auth) :
   dirty_rstat_inodes(member_offset(CInode, dirty_rstat_item)),
   projected_version(0),  item_dirty(this), item_new(this),
   scrub_infop(NULL),
+  needs_scrub_start(false),
   num_head_items(0), num_head_null(0),
   num_snap_items(0), num_snap_null(0),
   num_dirty(0), committing_version(0), committed_version(0),
@@ -2509,7 +2510,7 @@ void CDir::set_dir_auth(mds_authority_t a)
   // newly single auth?
   if (was_ambiguous && dir_auth.second == CDIR_AUTH_UNKNOWN) {
     list<MDSInternalContextBase*> ls;
-    take_waiting(WAIT_SINGLEAUTH, ls);
+    take_waiting(WAIT_SINGLEAUTH | WAIT_SCRUBQUEUE, ls);
     cache->mds->queue_waiters(ls);
   }
 }
@@ -2937,7 +2938,7 @@ void CDir::scrub_info_create() const
   me->scrub_infop = si;
 }
 
-void CDir::scrub_initialize(const ScrubHeaderRefConst& header)
+void CDir::scrub_initialize(const ScrubHeader& header)
 {
   dout(20) << __func__ << dendl;
   /*assert(!is_auth() || is_complete());*/
@@ -2961,7 +2962,6 @@ void CDir::scrub_initialize(const ScrubHeaderRefConst& header)
   scrub_infop->others_scrubbed.clear();
 
   if (is_auth()) {
-    //auth_pin(scrub_infop); /* XXX XXX */
     for (map_t::iterator i = items.begin();
 	 i != items.end();
 	 ++i) {
@@ -3030,16 +3030,46 @@ void CDir::scrub_reset()
 
       CDentry::linkage_t *dnl = i->second->get_projected_linkage();
       if (dnl->is_primary()) {
-	if (dnl->get_inode()->is_dir())
+	if (dnl->get_inode()->is_dir()) {
 	  scrub_infop->directories_to_scrub.insert(i->first);
-	else
+	}
+	else {
 	  scrub_infop->others_to_scrub.insert(i->first);
+	  dout(20) << "added " << i->first << dendl;
+	}
       } else if (dnl->is_remote()) {
 	// TODO: check remote linkage
       }
     }
   }
 }
+
+void CDir::scrub_abort()
+{
+  dout(20) << __func__ << dendl;
+
+  for (auto i : items) {
+    list<CDir *> dfs;
+    CInode *in = i.second->get_projected_inode();
+    in->get_dirfrags(dfs);
+    for (auto d : dfs) {
+      if (!d->state_test(CDir::STATE_EXPORTBOUND)) {
+	d->scrub_abort();
+      }
+    }
+  }
+
+  if (inode->item_scrub.is_on_list()) {
+    cache->mds->scrubstack->pop_inode(inode);
+  }
+
+  if (!scrub_infop) {
+    return;
+  }
+
+  scrub_remove_files();
+}
+
 
 int CDir::_next_dentry_on_set(set<dentry_key_t>& dns, bool missing_okay,
                               MDSInternalContext *cb, CDentry **dnout)
@@ -3074,7 +3104,7 @@ int CDir::_next_dentry_on_set(set<dentry_key_t>& dns, bool missing_okay,
     dns.erase(dnkey);
 
     if (dn->get_projected_version() < scrub_infop->last_recursive.version &&
-	!(scrub_infop->header && scrub_infop->header->force)) {
+	!(scrub_infop->header && scrub_infop->header.force)) {
       dout(15) << " skip dentry " << dnkey.name
 	       << ", no change since last scrub" << dendl;
       continue;
@@ -3161,6 +3191,23 @@ void CDir::scrub_dentry_finished(CDentry *dn)
   }
 }
 
+void CDir::scrub_remove_files() {
+  dout(20) << __func__ << dendl;
+  if (!scrub_infop) {
+    return;
+  }
+
+  set<dentry_key_t>& others = scrub_infop->others_scrubbing;
+  for (auto i : items) {
+    if (others.find(i.first) != others.end()) {
+      CInode *target = i.second->get_projected_inode();
+      if (target->item_scrub.is_on_list()) {
+	cache->mds->scrubstack->pop_inode(target);
+      }
+    }
+  }
+}
+
 void CDir::scrub_remove_dentries() {
   dout(20) << __func__ << dendl;
   if (!scrub_infop) {
@@ -3209,7 +3256,7 @@ bool CDir::scrub_local()
   } else {
     scrub_infop->pending_scrub_error = true;
     if (scrub_infop->header &&
-	scrub_infop->header->repair)
+	scrub_infop->header.repair)
       cache->repair_dirfrag_stats(this);
   }
   return rval;
