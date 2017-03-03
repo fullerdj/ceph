@@ -195,7 +195,7 @@ private:
    * @returns false if you have to wait, true if there's no work
    * left to do (we returned it, or there are none left in this inode).
    */
-  bool get_next_cdir(CInode *in, CDir **new_dir, bool *skip);
+  bool get_next_cdir(CInode *in, CDir **new_dir);
 
 };
 

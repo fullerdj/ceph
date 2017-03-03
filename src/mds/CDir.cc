@@ -2990,10 +2990,10 @@ void CDir::scrub_finished()
   assert(scrub_infop && scrub_infop->directory_scrubbing);
 
   assert(scrub_infop->directories_to_scrub.empty());
-  // XXX assert(scrub_infop->directories_scrubbing.empty());
+  assert(scrub_infop->directories_scrubbing.empty());
   scrub_infop->directories_scrubbed.clear();
   assert(scrub_infop->others_to_scrub.empty());
-  // XXX assert(scrub_infop->others_scrubbing.empty());
+  assert(scrub_infop->others_scrubbing.empty());
   scrub_infop->others_scrubbed.clear();
   scrub_infop->directory_scrubbing = false;
 
@@ -3067,7 +3067,12 @@ void CDir::scrub_abort()
     return;
   }
 
+  if (inode->scrub_infop) {
+    inode->scrub_infop->scrub_in_progress = false;
+  }
+
   scrub_remove_files();
+  scrub_infop->directory_scrubbing = false;
 }
 
 
@@ -3172,10 +3177,11 @@ void CDir::scrub_dentries_scrubbing(list<CDentry*> *out_dentries)
 void CDir::scrub_dentry_finished(CDentry *dn)
 {
   dout(20) << __func__ << " on dn " << *dn << dendl;
-  /* XXX assert(scrub_infop && scrub_infop->directory_scrubbing); */
+
   if (!scrub_infop || !scrub_infop->directory_scrubbing) {
     return;
   }
+
   dentry_key_t dn_key = dn->key();
   if (scrub_infop->directories_scrubbing.count(dn_key)) {
     scrub_infop->directories_scrubbing.erase(dn_key);
@@ -3202,7 +3208,9 @@ void CDir::scrub_remove_files() {
     if (others.find(i.first) != others.end()) {
       CInode *target = i.second->get_projected_inode();
       if (target->item_scrub.is_on_list()) {
+	assert(target->scrub_infop);
 	cache->mds->scrubstack->pop_inode(target);
+	target->scrub_infop->scrub_in_progress = false;
       }
     }
   }

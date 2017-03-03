@@ -1099,7 +1099,7 @@ public:
    * Report the results of validation against a particular inode.
    * Each member is a pair of bools.
    * <member>.first represents if validation was performed against the member.
-   * <member.second represents if the member passed validation.
+   * <member>.second represents if the member passed validation.
    * performed_validation is set to true if the validation was actually
    * run. It might not be run if, for instance, the inode is marked as dirty.
    * passed_validation is set to true if everything that was checked

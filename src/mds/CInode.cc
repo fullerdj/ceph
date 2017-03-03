@@ -246,16 +246,12 @@ ostream& operator<<(ostream& out, const CInode& in)
     in.print_pin_set(out);
   }
 
+  if (in.scrub_infop) {
+    out << " scrubbing with header " << in.scrub_infop->header;
+  }
+
   out << " " << &in;
   out << "]";
-
-  if (in.scrub_infop) {
-    out << " scrubbing";
-    /*if (in.scrub_infop->header) */{
-      out << " with header " << in.scrub_infop->header;
-      /* XXX */ out << " tag " << in.scrub_infop->header.tag;
-    }
-  }
 
   return out;
 }
@@ -3786,14 +3782,6 @@ void CInode::validate_disk_state(CInode::validated_data *results,
       C_OnFinisher *conf = new C_OnFinisher(get_io_callback(BACKTRACE),
                                             in->mdcache->mds->finisher);
 
-      MDCache *mdcache = in->mdcache;
-      inode_t &inode = in->inode;
-      dout(20) << "looking at " << *in << " with info " << in->scrub_infop
-	       << dendl;
-		  
-		  if (in->scrub_infop)
-		    dout(20) << " and header " << in->scrub_infop->header << dendl;
-
       // Whether we have a tag to apply depends on ScrubHeader (if one is
       // present)
       if (in->scrub_infop && in->scrub_infop->header) {
@@ -4037,10 +4025,7 @@ next:
 	}
 	goto next;
       }
-      {
-      LogChannelRef clog = in->mdcache->mds->clog;
-      clog->error() << "xxxx- " << *in << " " << nest_info << " " << in->inode.rstat;
-      }
+
       if (frags_errors > 0)
 	goto next;
 
@@ -4333,7 +4318,7 @@ void CInode::scrub_dirfrags_scrubbing(list<frag_t>* out_dirfrags)
 void CInode::scrub_dirfrag_finished(frag_t dirfrag)
 {
   dout(20) << __func__ << " on frag " << dirfrag << dendl;
-  assert(scrub_is_in_progress());
+  //assert(scrub_is_in_progress());
 
   std::map<frag_t, scrub_stamp_info_t>::iterator i =
       scrub_infop->dirfrag_stamps.find(dirfrag);
@@ -4353,9 +4338,10 @@ void CInode::scrub_finished(MDSInternalContextBase **c) {
       ++i) {
     if(i->second.last_scrub_version != i->second.scrub_start_version) {
       derr << i->second.last_scrub_version << " != "
-        << i->second.scrub_start_version << dendl;
+	   << i->second.scrub_start_version << dendl;
+      derr << "XXX- " << i->first << " " << i->second << dendl;
     }
-    //assert(i->second.last_scrub_version == i->second.scrub_start_version);
+    //assert(i->second.last_scrub_version >= i->second.scrub_start_version);
   }
 
   scrub_infop->last_scrub_version = scrub_infop->scrub_start_version;
@@ -4376,7 +4362,8 @@ void CInode::scrub_finished(MDSInternalContextBase **c) {
   if (scrub_infop->header && scrub_infop->header.origin == this) {
     // We are at the point that a tagging scrub was initiated
     LogChannelRef clog = mdcache->mds->clog;
-    clog->info() << "scrub complete with tag '" << scrub_infop->header.tag << "'";
+    clog->info() << "scrub complete with tag '"
+      << scrub_infop->header.tag << "'";
   }
 }
 

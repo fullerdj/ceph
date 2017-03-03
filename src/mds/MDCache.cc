@@ -12013,17 +12013,19 @@ public:
   void finish (int r) {
     CDir *dir = mds->mdcache->get_dirfrag(fg);
     LogChannelRef clog = mds->clog;
-    if (dir) {
-      clog->info() << "iiii-completed " << *dir;
-    } else {
-      clog->info() << "iiii-completed and gone " << fg;
+
+    if (!dir) {
+      C_MDS_NotifyScrubComplete *c = new C_MDS_NotifyScrubComplete(mds, fg, time);
+      mds->mdcache->open_ino(fg.ino, 0, c);
       return;
     }
 
     if (dir->is_subtree_root() && !dir->inode->is_root()) {
       MMDSScrubComplete *msg = new MMDSScrubComplete(dir->dirfrag(),
-						     dir->inode->inode.rstat, time);
+						     dir->inode->inode.rstat,
+						     time);
 
+      /* XXX */
       clog->info() << "iiii-sending completion to "
 		   << dir->get_parent_dir()->authority().first;
 
@@ -12041,22 +12043,23 @@ void MDCache::enqueue_scrub_dirfrag(dirfrag_t fg, const std::string &tag,
   CDir *target = get_dirfrag(fg);
   filepath fp;
 
-  C_MDS_NotifyScrubComplete *sc = new C_MDS_NotifyScrubComplete(mds, fg, time);
+  C_MDS_NotifyScrubComplete *sc = nullptr;
+  if (fg.ino != root) {
+    sc = new C_MDS_NotifyScrubComplete(mds, fg, time);
+  }
+
   C_MDS_EnqueueScrub *cs = new C_MDS_EnqueueScrub(NULL, NULL);
-  //ScrubHeaderRef &header = cs->header;
   ScrubHeader header;
   auto it = mds->scrubstack->scrub_ops.find(time);
   if (it == mds->scrubstack->scrub_ops.end()) {
-    ScrubHeader hdr;
-    hdr.oi = root;
-    hdr.tag = tag;
-    hdr.start = time;
-    hdr.force = force;
-    hdr.recursive = true;
-    hdr.repair = repair;
-    hdr.formatter = NULL;
-    mds->scrubstack->scrub_ops.insert(make_pair(time, hdr));
-    header = hdr;
+    header.oi = root;
+    header.tag = tag;
+    header.start = time;
+    header.force = force;
+    header.recursive = true;
+    header.repair = repair;
+    header.formatter = NULL;
+    mds->scrubstack->scrub_ops.insert(make_pair(time, header));
   } else {
     header = it->second;
   }
@@ -12083,17 +12086,17 @@ void MDCache::enqueue_scrub_dirfrag(dirfrag_t fg, const std::string &tag,
     target->inode->scrub_initialize(NULL, header, sc);
   } else {
     dout(20) << " already scrubbing " << *target->inode << dendl;
-    //target->set_scrub_reset();
     if (!target->inode->item_scrub.is_on_list()) {
-      dout(20) << "ssss- " << *target << " is not on list" << dendl;
+      dout(20) << *target << " is not on list" << dendl;
       mds->scrubstack->enqueue_inode_bottom(target->inode, header, NULL);
-      //mds->scrubstack->kick_off_scrubs();
     }
     mds->server->respond_to_request(mdr, 0);
     return;
   }
+
   mds->scrubstack->scrub_dirfrag(target, header, &_added_children,
 				 &_terminal, &done, true);
+
   if (done) {
     if (target->inode->scrub_is_in_progress()) {
       MDSInternalContextBase *c = NULL;
