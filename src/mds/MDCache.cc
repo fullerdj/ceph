@@ -12100,7 +12100,12 @@ void MDCache::enqueue_scrub_dirfrag(dirfrag_t fg, const std::string &tag,
   if (done) {
     if (target->inode->scrub_is_in_progress()) {
       MDSInternalContextBase *c = NULL;
-      target->inode->scrub_finished(&c);
+      if (target->is_auth()) {
+	target->inode->scrub_finished(&c);
+      } /*else {
+	c = target->inode->scrub_info()->on_finish;
+	target->inode->scrub_info()->on_finish = NULL;
+      } */
       if (c) {
 	mds->finisher->queue(new MDSIOContextWrapper(mds, c), 0);
       }

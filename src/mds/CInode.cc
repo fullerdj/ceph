@@ -4341,7 +4341,7 @@ void CInode::scrub_finished(MDSInternalContextBase **c) {
 	   << i->second.scrub_start_version << dendl;
       derr << "XXX- " << i->first << " " << i->second << dendl;
     }
-    //assert(i->second.last_scrub_version >= i->second.scrub_start_version);
+    assert(i->second.last_scrub_version >= i->second.scrub_start_version);
   }
 
   scrub_infop->last_scrub_version = scrub_infop->scrub_start_version;

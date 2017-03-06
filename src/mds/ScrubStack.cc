@@ -220,7 +220,6 @@ void ScrubStack::scrub_dir_inode(CInode *in,
 	  break;
 	} else {
 	  // Finished with all frags
-	  #if 0
 	  list<CDir *> ls;
 	  in->get_dirfrags(ls);
 	  if (in->scrub_is_in_progress()) {
@@ -228,7 +227,6 @@ void ScrubStack::scrub_dir_inode(CInode *in,
 	      in->scrub_dirfrag_finished(i->dirfrag().frag);
 	    }
 	  }
-	  #endif
 	  break;
 	}
       }
@@ -623,7 +621,9 @@ void ScrubStack::scrub_complete(dirfrag_t df, nest_info_t rstat, utime_t start)
 				   header.force, header.repair);
   }
 
-  push_inode(target->inode);
+  if (!target->inode->item_scrub.is_on_list()) {
+    push_inode(target->inode);
+  }
   kick_off_scrubs();
 }
 
