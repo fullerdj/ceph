@@ -3072,7 +3072,9 @@ void CDir::scrub_abort()
   }
 
   scrub_remove_files();
-  scrub_infop->directory_scrubbing = false;
+  //scrub_infop->directory_scrubbing = false;
+  delete scrub_infop;
+  scrub_infop = nullptr;
 }
 
 

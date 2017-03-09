@@ -220,6 +220,7 @@ void ScrubStack::scrub_dir_inode(CInode *in,
 	  break;
 	} else {
 	  // Finished with all frags
+	  /*
 	  list<CDir *> ls;
 	  in->get_dirfrags(ls);
 	  if (in->scrub_is_in_progress()) {
@@ -227,6 +228,7 @@ void ScrubStack::scrub_dir_inode(CInode *in,
 	      in->scrub_dirfrag_finished(i->dirfrag().frag);
 	    }
 	  }
+	  */
 	  break;
 	}
       }
@@ -250,8 +252,32 @@ void ScrubStack::scrub_dir_inode(CInode *in,
     dout(20) << "!scrub_recursive" << dendl;
   }
 
+  /*
+  list<CDir *>ls;
+  in->get_dirfrags(ls);
+  for (auto d : ls) {
+    if (!d->scrub_info()->directories_scrubbing.empty()
+	|| !d->scrub_info()->others_scrubbing.empty()) {
+      *done = false;
+      return;
+    }
+  }
+  */
+
   if (all_frags_done) {
     assert (!*added_children); // can't do this if children are still pending
+
+    /*
+    list<CDir *> ls;
+    in->get_dirfrags(ls);
+    if (in->scrub_is_in_progress()) {
+      for (auto i : ls) {
+	if (i->is_scrubbing()) {
+	  i->scrub_finished();
+	}
+      }
+    }
+    */
 
     // OK, so now I can... fire off a validate on the dir inode, and
     // when it completes, come through here again, noticing that we've
@@ -449,7 +475,7 @@ public:
     dir->scrub_info()->header = header;
     ss->scrub_dirfrag(dir, header, &added_children, &is_terminal, &done, frob);
     if (dir->is_auth() && is_terminal && done) {
-      dir->scrub_initialize(header);
+      //dir->scrub_initialize(header);
       ss->scrub_dir_inode_final(dir->get_inode());
     } else {
       if (dir->is_auth() && !dir->get_inode()->scrub_is_in_progress()) {
