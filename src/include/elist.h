@@ -145,6 +145,7 @@ public:
     item *cur, *next;
     size_t item_offset;
     mode_t mode;
+
   public:
     iterator(item *h, size_t o, mode_t m) :
       head(h), cur(h->_next), next(cur->_next), item_offset(o),
@@ -174,8 +175,21 @@ public:
       next = cur->_next;
       return *this;
     }
+
+    void set_end() {
+      cur = next = head;
+    }
+
     bool end() const {
       return cur == head;
+    }
+
+    bool operator==(iterator &i) {
+      return cur == i.cur;
+    }
+
+    bool operator!=(iterator &i) {
+      return cur != i.cur;
     }
   };
 
@@ -187,6 +201,11 @@ public:
   }
   iterator begin_cache_next(size_t o=0) {
     return iterator(&_head, o ? o : item_offset, CACHE_NEXT);
+  }
+  iterator end() {
+    iterator ret = iterator(&_head, item_offset, MAGIC);
+    ret.set_end();
+    return ret;
   }
 };
 

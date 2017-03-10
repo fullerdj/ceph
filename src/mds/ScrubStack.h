@@ -15,6 +15,9 @@
 #ifndef SCRUBSTACK_H_
 #define SCRUBSTACK_H_
 
+#include <atomic>
+
+#include "common/Mutex.h"
 #include "CDir.h"
 #include "CDentry.h"
 #include "CInode.h"
@@ -22,6 +25,11 @@
 #include "ScrubHeader.h"
 
 #include "include/elist.h"
+
+/* XXX */
+#include "common/LogClient.h"
+#include "mds/MDSRank.h"
+#include "mds/MDCache.h"
 
 class MDCache;
 class Finisher;
@@ -32,10 +40,11 @@ protected:
   /// A finisher needed so that we don't re-enter kick_off_scrubs
   Finisher *finisher;
 
+  Mutex stack_lock;
   /// The stack of dentries we want to scrub
   elist<CInode*> inode_stack;
   /// current number of dentries we're actually scrubbing
-  int scrubs_in_progress;
+  std::atomic_int scrubs_in_progress;
 public:
   map<utime_t, ScrubHeader> scrub_ops;
 protected:
@@ -48,6 +57,9 @@ protected:
     C_KickOffScrubs(MDCache *mdcache, ScrubStack *s);
     void finish(int r) { }
     void complete(int r) {
+      LogChannelRef log = stack->mdcache->mds->clog;
+      log->info() << "down 1 " << stack->scrubs_in_progress << " -> "
+		  << stack->scrubs_in_progress - 1;
       stack->scrubs_in_progress--;
       stack->kick_off_scrubs();
       // don't delete self
@@ -59,6 +71,7 @@ public:
   MDCache *mdcache;
   ScrubStack(MDCache *mdc, Finisher *finisher_) :
     finisher(finisher_),
+    stack_lock("ScrubStack::stack_lock"),
     inode_stack(member_offset(CInode, item_scrub)),
     scrubs_in_progress(0),
     scrubstack(this),
@@ -119,6 +132,9 @@ private:
   /* XXX */ public:
   /*inline*/ void pop_inode(CInode *in);
   /* XXX */ private:
+  CInode *front_inode();
+
+  void dump_stack();
 
   /**
    * Scrub a file inode.
