@@ -2971,7 +2971,12 @@ void CDir::scrub_initialize(const ScrubHeader& header)
 
       CDentry::linkage_t *dnl = i->second->get_projected_linkage();
       if (dnl->is_primary()) {
-	if (dnl->get_inode()->is_dir())
+	CInode *in = dnl->get_inode();
+	if (in->scrub_info()->last_scrub_version == in->get_version()) {
+	  dout(20) << "skipping " << *in << dendl;
+	  continue;
+	}
+	if (in->is_dir())
 	  scrub_infop->directories_to_scrub.insert(i->first);
 	else
 	  scrub_infop->others_to_scrub.insert(i->first);

@@ -36,6 +36,10 @@ class Finisher;
 
 class ScrubStack {
   friend class C_MDS_ScrubDirfrag;
+  /* XXX Allow remote scrub ops to unconditionally decrement
+     scrubs_in_progress. This will result in undercounting the
+     number of outstanding operations in certain cases. */
+  friend class C_MDS_NotifyScrubComplete;
 protected:
   /// A finisher needed so that we don't re-enter kick_off_scrubs
   Finisher *finisher;

@@ -6624,6 +6624,10 @@ bool MDCache::trim_inode(CDentry *dn, CInode *in, CDir *con, map<mds_rank_t, MCa
   dout(15) << "trim_inode " << *in << dendl;
   assert(in->get_num_ref() == 0);
 
+  if (in->item_scrub.is_on_list()) {
+    return true;
+  }
+
   if (in->is_dir()) {
     // If replica inode's dirfragtreelock is not readable, it's likely
     // some dirfrags of the inode are being fragmented and we will receive
@@ -11960,20 +11964,16 @@ public:
       tag(_tag), force(_force), repair(_repair) {}
 
   void finish (int r) {
-    LogChannelRef clog = mds->clog;
-
-    clog->info() << "C_MDS_EnqueueScrubDirfrag: " << r;
-
     CDir *target = mdc->get_dirfrag(fg);
     if (!target) {
       C_MDS_EnqueueScrubDirfrag *esdf = new C_MDS_EnqueueScrubDirfrag(mdc, mdr,
 								      fg,
-								      time, root,
+								      time,
+								      root,
 								      tag,
 								      force,
 								      repair);
       if (!mdc->have_inode(fg.ino)) {
-	clog->info() << "C_MDS_EnqueueScrubDirfrag opening";
 	mdc->open_ino(fg.ino, 0, esdf);
 	return;
       }
@@ -11981,13 +11981,10 @@ public:
       CInode *ino = mdc->get_inode(fg.ino);
       assert(ino);
       assert(ino->is_dir());
-      clog->info() << "C_MDS_EnqueueScrubDirfrag got: "  << *ino;
 
       if (!ino->is_auth()) {
 	C_MDS_EnqueueScrub *cs = static_cast<C_MDS_EnqueueScrub *>(mdr->internal_op_finish);
 	MMDSScrubPath *msg = new MMDSScrubPath(fg, cs->header);
-	clog->info() << "C_MDS_EnqueueScrubDirfrag sending to "
-		     << ino->authority().first;
 	mds->send_message_mds(msg, ino->authority().first);
 	mds->server->respond_to_request(mdr, 0);
 	return;
@@ -12005,10 +12002,15 @@ class C_MDS_NotifyScrubComplete : public MDSInternalContext {
 protected:
   dirfrag_t fg;
   utime_t time;
+  bool kick;
 
 public:
   C_MDS_NotifyScrubComplete(MDSRank *mds, dirfrag_t _fg, utime_t _time)
-    : MDSInternalContext(mds), fg(_fg), time(_time) {}
+    : MDSInternalContext(mds), fg(_fg), time(_time), kick(false) {}
+
+  void set_kick() {
+    kick = true;
+  }
 
   void finish (int r) {
     CDir *dir = mds->mdcache->get_dirfrag(fg);
@@ -12020,7 +12022,7 @@ public:
       return;
     }
 
-    if (dir->is_subtree_root() && !dir->inode->is_root()) {
+    if (!dir->inode->is_root()) {
       MMDSScrubComplete *msg = new MMDSScrubComplete(dir->dirfrag(),
 						     dir->inode->inode.rstat,
 						     time);
@@ -12030,6 +12032,16 @@ public:
 		   << dir->get_parent_dir()->authority().first;
 
       mds->send_message_mds(msg, dir->get_parent_dir()->authority().first);
+    } else {
+      kick = true;
+    }
+
+    if (kick) {
+      /* XXX This operation may have been expecting to complete through
+	 ScrubStack::scrub_kick, which performs this decrement. If it
+	 was not, we let an extra operation slip through here. */
+      mds->scrubstack->scrubs_in_progress--;
+      mds->scrubstack->kick_off_scrubs();
     }
   }
 };
@@ -12080,15 +12092,33 @@ void MDCache::enqueue_scrub_dirfrag(dirfrag_t fg, const std::string &tag,
   target->inode->make_path(fp);
   mdr->set_filepath(fp);
 
+  if (target->is_auth() && (target->scrub_info()->last_recursive.version ==
+			    target->get_projected_version())) {
+    dout(10) << __func__ << " skipping " << *target << dendl;
+    if (sc) {
+      mds->finisher->queue(new MDSIOContextWrapper(mds, sc), 0);
+    }
+    mds->server->respond_to_request(mdr, 0);
+    return;
+  }
+
   bool _added_children, _terminal;
   bool done = false;
-  if (!target->inode->scrub_is_in_progress()) {
-    target->inode->scrub_initialize(NULL, header, sc);
+  CInode *in = target->inode;
+  if (!in->scrub_is_in_progress()) {
+    CDentry *parent_dn = in->get_parent_dn();
+    assert(parent_dn || in->is_root());
+    in->scrub_initialize(parent_dn, header, sc);
   } else {
     dout(20) << " already scrubbing " << *target->inode << dendl;
-    if (!target->inode->item_scrub.is_on_list()) {
+    /* XXX reduce scrubs_in_progress or actually queue a finisher here */
+    sc->set_kick();
+    delete in->scrub_info()->on_finish;
+    in->scrub_info()->on_finish = nullptr;
+    in->scrub_set_finisher(sc);
+    if (!in->item_scrub.is_on_list()) {
       dout(20) << *target << " is not on list" << dendl;
-      mds->scrubstack->enqueue_inode_bottom(target->inode, header, NULL);
+      mds->scrubstack->enqueue_inode_bottom(in, header, NULL);
     }
     mds->server->respond_to_request(mdr, 0);
     return;
@@ -12098,20 +12128,19 @@ void MDCache::enqueue_scrub_dirfrag(dirfrag_t fg, const std::string &tag,
 				 &_terminal, &done, true);
 
   if (done) {
-    if (target->inode->scrub_is_in_progress()) {
-      MDSInternalContextBase *c = NULL;
+    if (in->scrub_is_in_progress()) {
+      MDSInternalContextBase *c = nullptr;
       if (target->is_auth()) {
-	target->inode->scrub_finished(&c);
+	in->scrub_finished(&c);
       } else {
-	c = target->inode->scrub_info()->on_finish;
-	//target->inode->scrub_info()->on_finish = NULL;
+	c = in->scrub_info()->on_finish;
       }
       if (c) {
 	mds->finisher->queue(new MDSIOContextWrapper(mds, c), 0);
       }
     }
   } else if (target->is_auth() && !target->is_ambiguous_auth()) {
-    mds->scrubstack->enqueue_inode_bottom(target->inode, header, NULL);
+    mds->scrubstack->enqueue_inode_bottom(in, header, NULL);
   }
   mds->scrubstack->kick_off_scrubs();
   mds->server->respond_to_request(mdr, 0);
