@@ -12,7 +12,6 @@
  *
  */
 
-
 #ifndef SCRUB_HEADER_H_
 #define SCRUB_HEADER_H_
 
@@ -23,7 +22,17 @@ class CInode;
  * of where we are doing a recursive scrub
  */
 class ScrubHeader {
+protected:
+  std::string tag;
+  bool force;
+  bool recursive;
+  bool repair;
+  Formatter * formatter;
+  CInode *origin;
+  inodeno_t oi;
+
 public:
+  ScrubHeader() {}
   ScrubHeader(const std::string &tag_, bool force_, bool recursive_,
               bool repair_, Formatter *f_)
       : tag(tag_), force(force_), recursive(recursive_), repair(repair_),
@@ -35,25 +44,35 @@ public:
   // Set after construction because it won't be known until we've
   // started resolving path and locking
   void set_origin(CInode *origin_) { origin = origin_; }
+  void set_oi(inodeno_t oi_) { oi = oi_; }
 
   bool get_recursive() const { return recursive; }
   bool get_repair() const { return repair; }
   bool get_force() const { return force; }
+  inodeno_t get_oi() const { return oi; }
   const CInode *get_origin() const { return origin; }
   const std::string &get_tag() const { return tag; }
-  Formatter &get_formatter() const { return *formatter; }
+  Formatter *get_formatter() const { return formatter; }
 
-protected:
-  const std::string tag;
-  const bool force;
-  const bool recursive;
-  const bool repair;
-  Formatter * const formatter;
-  CInode *origin;
+  void encode(bufferlist& bl) const {
+	  ::encode(oi, bl);
+	  ::encode(tag, bl);
+	  ::encode(recursive, bl);
+	  ::encode(repair, bl);
+  }
+
+  void decode(bufferlist::iterator& bl) {
+	  ::decode(oi, bl);
+	  ::decode(tag, bl);
+	  ::decode(recursive, bl);
+	  ::decode(repair, bl);
+  }
+
+  operator bool() const { return oi != inodeno_t(); }
 };
+WRITE_CLASS_ENCODER(ScrubHeader)
 
 typedef ceph::shared_ptr<ScrubHeader> ScrubHeaderRef;
 typedef ceph::shared_ptr<const ScrubHeader> ScrubHeaderRefConst;
 
 #endif // SCRUB_HEADER_H_
-
