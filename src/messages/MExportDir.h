@@ -25,6 +25,8 @@ class MExportDir : public Message {
   bufferlist export_data;
   vector<dirfrag_t> bounds;
   bufferlist client_map;
+  bool scrub;
+  ScrubHeader scrub_header;
 
   MExportDir() : Message(MSG_MDS_EXPORTDIR) {}
   MExportDir(dirfrag_t df, uint64_t tid) :
@@ -49,6 +51,8 @@ public:
     ::encode(bounds, payload);
     ::encode(export_data, payload);
     ::encode(client_map, payload);
+    ::encode(scrub, payload);
+    ::encode(scrub_header, payload);
   }
   void decode_payload() override {
     bufferlist::iterator p = payload.begin();
@@ -56,6 +60,8 @@ public:
     ::decode(bounds, p);
     ::decode(export_data, p);
     ::decode(client_map, p);
+    ::decode(scrub, p);
+    ::decode(scrub_header, p);
   }
 
 };
