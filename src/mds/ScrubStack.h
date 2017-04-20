@@ -15,6 +15,9 @@
 #ifndef SCRUBSTACK_H_
 #define SCRUBSTACK_H_
 
+#include <atomic>
+
+#include "common/Mutex.h"
 #include "CDir.h"
 #include "CDentry.h"
 #include "CInode.h"
@@ -31,10 +34,11 @@ protected:
   /// A finisher needed so that we don't re-enter kick_off_scrubs
   Finisher *finisher;
 
+  Mutex stack_lock;
   /// The stack of dentries we want to scrub
   elist<CInode*> inode_stack;
   /// current number of dentries we're actually scrubbing
-  int scrubs_in_progress;
+  std::atomic_int scrubs_in_progress;
   ScrubStack *scrubstack; // hack for dout
   int stack_size;
 
@@ -55,6 +59,7 @@ public:
   MDCache *mdcache;
   ScrubStack(MDCache *mdc, Finisher *finisher_) :
     finisher(finisher_),
+    stack_lock("ScrubStack::stack_lock"),
     inode_stack(member_offset(CInode, item_scrub)),
     scrubs_in_progress(0),
     scrubstack(this),
@@ -111,6 +116,7 @@ private:
    * Pop the given inode off the stack.
    */
   inline void pop_inode(CInode *in);
+  CInode *front_inode();
 
   /**
    * Scrub a file inode.
