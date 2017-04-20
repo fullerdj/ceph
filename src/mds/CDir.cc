@@ -27,6 +27,8 @@
 #include "MDLog.h"
 #include "LogSegment.h"
 
+#include "ScrubStack.h"
+
 #include "common/bloom_filter.hpp"
 #include "include/Context.h"
 #include "common/Clock.h"
@@ -184,6 +186,7 @@ CDir::CDir(CInode *in, frag_t fg, MDCache *mdcache, bool auth) :
   first(2),
   dirty_rstat_inodes(member_offset(CInode, dirty_rstat_item)),
   projected_version(0),  item_dirty(this), item_new(this),
+  needs_scrub_start(false),
   num_head_items(0), num_head_null(0),
   num_snap_items(0), num_snap_null(0),
   num_dirty(0), committing_version(0), committed_version(0),
@@ -3114,6 +3117,83 @@ void CDir::scrub_finished()
   scrub_infop->last_scrub_dirty = true;
 }
 
+void CDir::scrub_reset()
+{
+  dout(20) << __func__ << dendl;
+  if (!scrub_infop || !scrub_infop->directory_scrubbing) {
+    return;
+  }
+  scrub_infop->recursive_start.version = get_projected_version();
+  scrub_infop->recursive_start.time = ceph_clock_now(g_ceph_context);
+
+  scrub_infop->directories_to_scrub.clear();
+  scrub_infop->directories_scrubbing.clear();
+  scrub_infop->directories_scrubbed.clear();
+  scrub_infop->others_to_scrub.clear();
+  scrub_infop->others_scrubbing.clear();
+  scrub_infop->others_scrubbed.clear();
+
+  scrub_infop->needs_reset = false;
+
+  if (is_auth()) {
+    for (map_t::iterator i = items.begin();
+	 i != items.end();
+	 ++i) {
+      // TODO: handle snapshot scrubbing
+      if (i->first.snapid != CEPH_NOSNAP)
+	continue;
+
+      CDentry::linkage_t *dnl = i->second->get_projected_linkage();
+      if (dnl->is_primary()) {
+	if (dnl->get_inode()->is_dir()) {
+	  scrub_infop->directories_to_scrub.insert(i->first);
+	}
+	else {
+	  scrub_infop->others_to_scrub.insert(i->first);
+	  dout(20) << "added " << i->first << dendl;
+	}
+      } else if (dnl->is_remote()) {
+	// TODO: check remote linkage
+      }
+    }
+  }
+}
+
+void CDir::scrub_abort()
+{
+  dout(20) << __func__ << dendl;
+
+  for (auto i : items) {
+    list<CDir *> dfs;
+    CInode *in = i.second->get_projected_inode();
+    in->get_dirfrags(dfs);
+    for (auto d : dfs) {
+      if (!d->state_test(CDir::STATE_EXPORTBOUND)) {
+	d->scrub_abort();
+      }
+    }
+  }
+
+  if (inode->item_scrub.is_on_list()) {
+    cache->mds->scrubstack->pop_inode(inode);
+  }
+
+  if (!scrub_infop) {
+    return;
+  }
+
+  if (inode->scrub_infop) {
+    inode->scrub_infop->scrub_in_progress = false;
+  }
+
+  scrub_remove_files();
+  /* XXX why is this commented out? */
+  //scrub_infop->directory_scrubbing = false;
+  delete scrub_infop;
+  scrub_infop = nullptr;
+}
+
+
 int CDir::_next_dentry_on_set(set<dentry_key_t>& dns, bool missing_okay,
                               MDSInternalContext *cb, CDentry **dnout)
 {
@@ -3220,9 +3300,52 @@ void CDir::scrub_dentry_finished(CDentry *dn)
   if (scrub_infop->directories_scrubbing.erase(dn_key)) {
     scrub_infop->directories_scrubbed.insert(dn_key);
   } else {
-    assert(scrub_infop->others_scrubbing.count(dn_key));
+     if (scrub_infop->others_scrubbing.count(dn_key) == 0) {
+       // Someone else called scrub_reset at the same time.
+       return;
+    }
     scrub_infop->others_scrubbing.erase(dn_key);
     scrub_infop->others_scrubbed.insert(dn_key);
+  }
+}
+
+void CDir::scrub_remove_files() {
+  dout(20) << __func__ << dendl;
+  if (!scrub_infop) {
+    return;
+  }
+
+  set<dentry_key_t>& others = scrub_infop->others_scrubbing;
+  for (auto i : items) {
+    if (others.find(i.first) != others.end()) {
+      CInode *target = i.second->get_projected_inode();
+      if (target->item_scrub.is_on_list()) {
+	assert(target->scrub_infop);
+	cache->mds->scrubstack->pop_inode(target);
+	target->scrub_infop->scrub_in_progress = false;
+      }
+    }
+  }
+}
+
+void CDir::scrub_remove_dentries() {
+  dout(20) << __func__ << dendl;
+  if (!scrub_infop) {
+    return;
+  }
+  set<dentry_key_t>& others = scrub_infop->others_scrubbing;
+  set<dentry_key_t>& directories = scrub_infop->directories_scrubbing;
+  scrub_infop->directories_to_scrub.clear();
+  scrub_infop->others_to_scrub.clear();
+
+  for (auto i : items) {
+    if (others.find(i.first) != others.end() ||
+	directories.find(i.first) != directories.end()) {
+      CInode *target = i.second->get_projected_inode();
+      if (target->item_scrub.is_on_list()) {
+	cache->mds->scrubstack->pop_inode(target);
+      }
+    }
   }
 }
 

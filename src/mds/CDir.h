@@ -246,6 +246,8 @@ public:
     bool last_scrub_dirty; /// is scrub info dirty or is it flushed to fnode?
     bool pending_scrub_error;
 
+    bool needs_reset;
+
     /// these are lists of children in each stage of scrubbing
     set<dentry_key_t> directories_to_scrub;
     set<dentry_key_t> directories_scrubbing;
@@ -260,7 +262,8 @@ public:
       directory_scrubbing(false),
       need_scrub_local(false),
       last_scrub_dirty(false),
-      pending_scrub_error(false) {}
+      pending_scrub_error(false),
+      needs_reset(false) {}
   };
   /**
    * Call to start this CDir on a new scrub.
@@ -297,6 +300,8 @@ public:
    * @param dn The CDentry which has been scrubbed.
    */
   void scrub_dentry_finished(CDentry *dn);
+  void scrub_remove_files();
+  void scrub_remove_dentries();
   /**
    * Call this once all CDentries have been scrubbed, according to
    * scrub_dentry_next's listing. It finalizes the scrub statistics.
@@ -308,6 +313,33 @@ public:
    * @returns true if the rstats and directory contents match, false otherwise.
    */
   bool scrub_local();
+  bool is_scrubbing() {
+    return scrub_infop && scrub_infop->directory_scrubbing;
+  }
+  bool is_scrub_queued() {
+    return inode->item_scrub.is_on_list();
+  }
+  bool needs_scrub_reset() {
+    if (!scrub_infop) {
+      return false;
+    }
+    return scrub_infop->needs_reset;
+  }
+  void set_scrub_reset() {
+    if (scrub_infop) {
+      scrub_infop->needs_reset = true;
+    }
+  }
+
+  void set_scrub_start(bool _s) {
+    needs_scrub_start = _s;
+  }
+
+  bool need_scrub_start() {
+    return needs_scrub_start;
+  }
+  void scrub_reset();
+  void scrub_abort();
 private:
   /**
    * Create a scrub_info_t struct for the scrub_infop pointer.
@@ -327,6 +359,7 @@ private:
 
 protected:
   std::unique_ptr<scrub_info_t> scrub_infop;
+  bool needs_scrub_start;
 
   // contents of this directory
   map_t items;       // non-null AND null
@@ -391,7 +424,7 @@ protected:
  public:
   CDir(CInode *in, frag_t fg, MDCache *mdcache, bool auth);
 
-  const scrub_info_t *scrub_info() const {
+  scrub_info_t *scrub_info() const {
     if (!scrub_infop) {
       scrub_info_create();
     }
