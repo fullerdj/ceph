@@ -273,7 +273,7 @@ class CInode : public MDSCacheObject, public InodeStoreBase, public Counter<CIno
     /// my own (temporary) stamps and versions for each dirfrag we have
     std::map<frag_t, scrub_stamp_info_t> dirfrag_stamps;
 
-    ScrubHeaderRefConst header;
+    ScrubHeader header;
 
     scrub_info_t() : scrub_stamp_info_t(),
 	scrub_parent(NULL), on_finish(NULL),
@@ -299,7 +299,7 @@ class CInode : public MDSCacheObject, public InodeStoreBase, public Counter<CIno
    * directory's get_projected_version())
    */
   void scrub_initialize(CDentry *scrub_parent,
-			const ScrubHeaderRefConst& header,
+			const ScrubHeader& header,
 			MDSInternalContextBase *f);
   /**
    * Get the next dirfrag to scrub. Gives you a frag_t in output param which
@@ -1100,7 +1100,7 @@ public:
    * Report the results of validation against a particular inode.
    * Each member is a pair of bools.
    * <member>.first represents if validation was performed against the member.
-   * <member.second represents if the member passed validation.
+   * <member>.second represents if the member passed validation.
    * performed_validation is set to true if the validation was actually
    * run. It might not be run if, for instance, the inode is marked as dirty.
    * passed_validation is set to true if everything that was checked

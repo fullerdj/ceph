@@ -59,7 +59,7 @@ void ScrubStack::pop_inode(CInode *in)
 }
 
 void ScrubStack::_enqueue_inode(CInode *in, CDentry *parent,
-				const ScrubHeaderRefConst& header,
+				const ScrubHeader& header,
 				MDSInternalContextBase *on_finish, bool top)
 {
   dout(10) << __func__ << " with {" << *in << "}"
@@ -72,7 +72,7 @@ void ScrubStack::_enqueue_inode(CInode *in, CDentry *parent,
     push_inode_bottom(in);
 }
 
-void ScrubStack::enqueue_inode(CInode *in, const ScrubHeaderRefConst& header,
+void ScrubStack::enqueue_inode(CInode *in, const ScrubHeader& header,
                                MDSInternalContextBase *on_finish, bool top)
 {
   _enqueue_inode(in, NULL, header, on_finish, top);
@@ -134,9 +134,9 @@ void ScrubStack::scrub_dir_inode(CInode *in,
   bool all_frags_terminal = true;
   bool all_frags_done = true;
 
-  const ScrubHeaderRefConst& header = in->scrub_info()->header;
+  ScrubHeader& header = in->scrub_info()->header;
 
-  if (header->get_recursive()) {
+  if (header.get_recursive()) {
     list<frag_t> scrubbing_frags;
     list<CDir*> scrubbing_cdirs;
     in->scrub_dirfrags_scrubbing(&scrubbing_frags);
@@ -368,7 +368,7 @@ void ScrubStack::_validate_inode_done(CInode *in, int r,
 				      const CInode::validated_data &result)
 {
   LogChannelRef clog = mdcache->mds->clog;
-  const ScrubHeaderRefConst header = in->scrub_info()->header;
+  const ScrubHeader& header = &in->scrub_info()->header;
 
   std::string path;
   if (!result.passed_validation) {
@@ -408,18 +408,24 @@ void ScrubStack::_validate_inode_done(CInode *in, int r,
     dout(10) << __func__ << " scrub passed on inode " << *in << dendl;
   }
 
-  MDSInternalContextBase *c = NULL;
-  in->scrub_finished(&c);
+  MDSInternalContextBase *c = nullptr;
+  if (in->scrub_is_in_progress() && r == 0) {
+    in->scrub_finished(&c);
+  }
 
-  if (!header->get_recursive() && in == header->get_origin()) {
+  if (header.get_formatter() && !header.get_recursive()
+      && in == header.get_origin()) {
     if (r >= 0) { // we got into the scrubbing dump it
       result.dump(&(header->get_formatter()));
     } else { // we failed the lookup or something; dump ourselves
-      header->get_formatter().open_object_section("results");
-      header->get_formatter().dump_int("return_code", r);
-      header->get_formatter().close_section(); // results
+      header.get_formatter().open_object_section("results");
+      header.get_formatter().dump_int("return_code", r);
+      header.get_formatter().close_section(); // results
+  clog->info() << __func__ << " " << *in << " r=" << r;
+
     }
   }
+
   if (c) {
     finisher->queue(new MDSIOContextWrapper(mdcache->mds, c), 0);
   }

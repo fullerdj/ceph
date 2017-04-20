@@ -254,7 +254,7 @@ public:
     set<dentry_key_t> others_scrubbing;
     set<dentry_key_t> others_scrubbed;
 
-    ScrubHeaderRefConst header;
+    ScrubHeader header;
 
     scrub_info_t() :
       directory_scrubbing(false),
@@ -268,7 +268,7 @@ public:
    * @pre The CDir is marked complete.
    * @post It has set up its internal scrubbing state.
    */
-  void scrub_initialize(const ScrubHeaderRefConst& header);
+  void scrub_initialize(const ScrubHeader& header);
   /**
    * Get the next dentry to scrub. Gives you a CDentry* and its meaning. This
    * function will give you all directory-representing dentries before any
