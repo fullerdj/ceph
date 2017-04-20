@@ -6743,6 +6743,10 @@ bool MDCache::trim_inode(CDentry *dn, CInode *in, CDir *con, map<mds_rank_t, MCa
   dout(15) << "trim_inode " << *in << dendl;
   assert(in->get_num_ref() == 0);
 
+  if (in->item_scrub.is_on_list()) {
+    return true;
+  }
+
   if (in->is_dir()) {
     // If replica inode's dirfragtreelock is not readable, it's likely
     // some dirfrags of the inode are being fragmented and we will receive
