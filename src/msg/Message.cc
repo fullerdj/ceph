@@ -130,6 +130,7 @@ using namespace std;
 #include "messages/MMDSOpenInoReply.h"
 
 #include "messages/MMDSScrubPath.h"
+#include "messages/MMDSScrubComplete.h"
 
 #include "messages/MDirUpdate.h"
 #include "messages/MDiscover.h"
@@ -663,6 +664,9 @@ Message *decode_message(CephContext *cct, int crcflags,
 
   case MSG_MDS_SCRUBPATH:
     m = new MMDSScrubPath;
+    break;
+  case MSG_MDS_SCRUBCOMPLETE:
+    m = new MMDSScrubComplete;
     break;
 
   case MSG_MDS_FRAGMENTNOTIFY:
