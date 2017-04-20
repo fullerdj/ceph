@@ -1352,6 +1352,18 @@ void Migrator::export_go_synced(CDir *dir, uint64_t tid)
 
   // set ambiguous auth
   cache->adjust_subtree_auth(dir, mds->get_nodeid(), dest);
+  bool scrubbing = dir->is_scrub_queued();
+  if (scrubbing) {
+    dout(20) << "is_scrub_queued: " << *dir << dendl;
+    dir->scrub_abort();
+  } else {
+    dout(20) << "not_scrub_queued: " << *dir << dendl;
+  }
+
+  if (dir->is_waiter_for(CDir::WAIT_SCRUBQUEUE)) {
+    dir->scrub_abort();
+    scrubbing = true;
+  }
 
   // take away the popularity we're sending.
   utime_t now = ceph_clock_now();
@@ -1366,6 +1378,11 @@ void Migrator::export_go_synced(CDir *dir, uint64_t tid)
 					      now);
   ::encode(exported_client_map, req->client_map,
            mds->mdsmap->get_up_features());
+
+  req->scrub = scrubbing;
+  if (scrubbing) {
+    req->scrub_header = dir->inode->scrub_infop->header;
+  }
 
   // add bounds to message
   set<CDir*> bounds;
@@ -2422,6 +2439,14 @@ void Migrator::handle_export_dir(MExportDir *m)
   EImportStart *le = new EImportStart(mds->mdlog, dir->dirfrag(), m->bounds, oldauth);
   mds->mdlog->start_entry(le);
 
+  dir->set_scrub_start(m->scrub);
+  le->set_scrub(m->scrub);
+  if (m->scrub) {
+    ScrubHeader sh = m->scrub_header;
+    dir->scrub_info()->header = sh;
+    dir->scrub_info()->header = m->scrub_header;
+  }
+
   le->metablob.add_dir_context(dir);
   
   // adjust auth (list us _first_)
@@ -2782,6 +2807,14 @@ void Migrator::import_logged_start(dirfrag_t df, CDir *dir, mds_rank_t from,
 
   // test surviving observer of a failed migration that did not complete
   //assert(dir->replica_map.size() < 2 || mds->get_nodeid() != 0);
+
+  dout(20) << "need scrub?: " << dir->need_scrub_start() << dendl;
+  if (dir->need_scrub_start()) {
+    ScrubHeader header = dir->scrub_info()->header;
+    cache->enqueue_scrub_dirfrag(dir->dirfrag(), header.get_tag(),
+				 header.get_oi(), header.get_force(),
+				 header.get_repair());
+  }
 
   MExportDirAck *ack = new MExportDirAck(dir->dirfrag(), it->second.tid);
   ::encode(imported_caps, ack->imported_caps);

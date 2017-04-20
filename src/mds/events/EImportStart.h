@@ -29,6 +29,7 @@ protected:
   dirfrag_t base;
   vector<dirfrag_t> bounds;
   mds_rank_t from;
+  bool scrub;
 
 public:
   EMetaBlob metablob;
@@ -37,7 +38,7 @@ public:
 
   EImportStart(MDLog *log, dirfrag_t di, vector<dirfrag_t>& b, mds_rank_t f) :
     LogEvent(EVENT_IMPORTSTART),
-    base(di), bounds(b), from(f) { }
+    base(di), bounds(b), from(f), scrub(false) { }
   EImportStart() :
     LogEvent(EVENT_IMPORTSTART), from(MDS_RANK_NONE) { }
   
@@ -46,6 +47,7 @@ public:
   }
 
   EMetaBlob *get_metablob() override { return &metablob; }
+  void set_scrub(bool _s) { scrub = _s; }
   
   void encode(bufferlist &bl, uint64_t features) const override;
   void decode(bufferlist::iterator &bl) override;
