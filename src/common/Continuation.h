@@ -45,7 +45,7 @@
  */
 
 class Continuation {
-  std::set<int> stages_in_flight;
+  std::multiset<int> stages_in_flight;
   std::set<int> stages_processing;
   int rval;
   Context *on_finish;
@@ -123,7 +123,7 @@ private:
   std::map<int, Continuation::stagePtr> callbacks;
 
   bool _continue_function(int r, int n) {
-    set<int>::iterator stage_iter = stages_in_flight.find(n);
+    multiset<int>::iterator stage_iter = stages_in_flight.find(n);
     assert(stage_iter != stages_in_flight.end());
     assert(callbacks.count(n));
     stagePtr p = callbacks[n];
