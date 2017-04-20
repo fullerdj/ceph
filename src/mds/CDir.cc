@@ -222,6 +222,10 @@ bool CDir::check_rstats(bool scrub)
 
   dout(25) << "check_rstats on " << this << dendl;
   if (!is_complete() || !is_auth() || is_frozen()) {
+    dout(10) << this << " complete: " << is_complete()
+	     << " auth: " << is_auth()
+	     << " frozen: " << is_frozen()
+	     << " auth pin: " << is_auth_pinned() << dendl;
     assert(!scrub);
     dout(10) << "check_rstats bailing out -- incomplete or non-auth or frozen dir!" << dendl;
     return true;
@@ -3061,13 +3065,12 @@ void CDir::scrub_info_create() const
 void CDir::scrub_initialize(const ScrubHeader& header)
 {
   dout(20) << __func__ << dendl;
-  assert(is_complete());
-  assert(header != nullptr);
 
   // FIXME: weird implicit construction, is someone else meant
   // to be calling scrub_info_create first?
   scrub_info();
-  assert(scrub_infop && !scrub_infop->directory_scrubbing);
+  assert(scrub_infop);
+  assert(!scrub_infop->directory_scrubbing);
 
   scrub_infop->recursive_start.version = get_projected_version();
   scrub_infop->recursive_start.time = ceph_clock_now();
@@ -3079,21 +3082,28 @@ void CDir::scrub_initialize(const ScrubHeader& header)
   scrub_infop->others_scrubbing.clear();
   scrub_infop->others_scrubbed.clear();
 
-  for (map_t::iterator i = items.begin();
-      i != items.end();
-      ++i) {
-    // TODO: handle snapshot scrubbing
-    if (i->first.snapid != CEPH_NOSNAP)
-      continue;
+  if (is_auth()) {
+    for (map_t::iterator i = items.begin();
+	 i != items.end();
+	 ++i) {
+      // TODO: handle snapshot scrubbing
+      if (i->first.snapid != CEPH_NOSNAP)
+	continue;
 
-    CDentry::linkage_t *dnl = i->second->get_projected_linkage();
-    if (dnl->is_primary()) {
-      if (dnl->get_inode()->is_dir())
-	scrub_infop->directories_to_scrub.insert(i->first);
-      else
-	scrub_infop->others_to_scrub.insert(i->first);
-    } else if (dnl->is_remote()) {
-      // TODO: check remote linkage
+      CDentry::linkage_t *dnl = i->second->get_projected_linkage();
+      if (dnl->is_primary()) {
+	CInode *in = dnl->get_inode();
+	if (in->scrub_info()->last_scrub_version == in->get_version()) {
+	  dout(20) << "skipping " << *in << dendl;
+	  continue;
+	}
+	if (in->is_dir())
+	  scrub_infop->directories_to_scrub.insert(i->first);
+	else
+	  scrub_infop->others_to_scrub.insert(i->first);
+      } else if (dnl->is_remote()) {
+	// TODO: check remote linkage
+      }
     }
   }
   scrub_infop->directory_scrubbing = true;
@@ -3124,7 +3134,7 @@ void CDir::scrub_reset()
     return;
   }
   scrub_infop->recursive_start.version = get_projected_version();
-  scrub_infop->recursive_start.time = ceph_clock_now(g_ceph_context);
+  scrub_infop->recursive_start.time = ceph_clock_now();
 
   scrub_infop->directories_to_scrub.clear();
   scrub_infop->directories_scrubbing.clear();
@@ -3178,19 +3188,22 @@ void CDir::scrub_abort()
     cache->mds->scrubstack->pop_inode(inode);
   }
 
-  if (!scrub_infop) {
-    return;
+  if (inode->scrub_infop) {
+    if (inode->scrub_infop->scrub_in_progress) {
+      inode->scrub_infop->scrub_in_progress = false;
+      delete inode->scrub_infop->on_finish;
+      inode->scrub_infop->on_finish = nullptr;
+    }
   }
 
-  if (inode->scrub_infop) {
-    inode->scrub_infop->scrub_in_progress = false;
+  if (!scrub_infop) {
+    return;
   }
 
   scrub_remove_files();
   /* XXX why is this commented out? */
   //scrub_infop->directory_scrubbing = false;
-  delete scrub_infop;
-  scrub_infop = nullptr;
+  scrub_infop.reset(nullptr);
 }
 
 
@@ -3295,7 +3308,11 @@ void CDir::scrub_dentries_scrubbing(list<CDentry*> *out_dentries)
 void CDir::scrub_dentry_finished(CDentry *dn)
 {
   dout(20) << __func__ << " on dn " << *dn << dendl;
-  assert(scrub_infop && scrub_infop->directory_scrubbing);
+
+  if (!scrub_infop || !scrub_infop->directory_scrubbing) {
+    return;
+  }
+
   dentry_key_t dn_key = dn->key();
   if (scrub_infop->directories_scrubbing.erase(dn_key)) {
     scrub_infop->directories_scrubbed.insert(dn_key);
