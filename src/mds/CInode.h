@@ -266,7 +266,7 @@ class CInode : public MDSCacheObject, public InodeStoreBase, public Counter<CIno
 	children_scrubbed(false) {}
   };
 
-  const scrub_info_t *scrub_info() const{
+  scrub_info_t *scrub_info() const{
     if (!scrub_infop)
       scrub_info_create();
     return scrub_infop;
@@ -1145,6 +1145,7 @@ private:
                             int rval, int stage);
   friend class ValidationContinuation;
   /** @} Scrubbing and fsck */
+  /* XXX */ friend ostream& operator<<(ostream& out, const CInode& in);
 };
 
 ostream& operator<<(ostream& out, const CInode::scrub_stamp_info_t& si);
