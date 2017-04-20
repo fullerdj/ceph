@@ -36,10 +36,7 @@ public:
   ScrubHeader(const std::string &tag_, bool force_, bool recursive_,
               bool repair_, Formatter *f_)
       : tag(tag_), force(force_), recursive(recursive_), repair(repair_),
-        formatter(f_), origin(nullptr)
-  {
-    assert(formatter != nullptr);
-  }
+        formatter(f_), origin(nullptr) {}
 
   // Set after construction because it won't be known until we've
   // started resolving path and locking
