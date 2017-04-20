@@ -247,9 +247,14 @@ ostream& operator<<(ostream& out, const CInode& in)
   if (in.inode.export_pin != MDS_RANK_NONE) {
     out << " export_pin=" << in.inode.export_pin;
   }
+  
+  if (in.scrub_infop) {
+    out << " scrubbing with header " << in.scrub_infop->header;
+  }
 
   out << " " << &in;
   out << "]";
+
   return out;
 }
 
@@ -3845,6 +3850,9 @@ void CInode::validate_disk_state(CInode::validated_data *results,
     }
 
     bool _start(int rval) {
+      if (!in->is_auth()) {
+	  return true;
+      }
       if (in->is_dirty()) {
         MDCache *mdcache = in->mdcache;
         inode_t& inode = in->inode;
@@ -3993,6 +4001,8 @@ next:
     }
 
     bool _inode_disk(int rval) {
+      LogChannelRef clog = in->mdcache->mds->clog;
+      clog->error() << "inode_disk: results = " << results << " on " << *in;
       results->inode.checked = true;
       results->inode.ondisk_read_retval = rval;
       results->inode.ondisk_value = shadow_in->inode;
@@ -4026,10 +4036,20 @@ next:
           p != frags.end();
           ++p) {
         CDir *dir = in->get_or_open_dirfrag(in->mdcache, *p);
+	if (!dir->is_auth()) {
+	  return immediate(DIRFRAGS, 0);
+	}
 	dir->scrub_info();
 	if (!dir->scrub_infop->header)
 	  dir->scrub_infop->header = in->scrub_infop->header;
         if (dir->is_complete()) {
+	  if (dir->is_frozen()) {
+	    LogChannelRef clog = in->mdcache->mds->clog;
+	    clog->error() << "frozen: " << *dir << " calling back for "
+		     << *in;
+	    dir->add_waiter(WAIT_UNFREEZE, get_internal_callback(BACKTRACE));
+	    return false;
+	  }
 	  dir->scrub_local();
 	} else {
 	  dir->scrub_infop->need_scrub_local = true;
@@ -4099,6 +4119,7 @@ next:
 	}
 	goto next;
       }
+
       if (frags_errors > 0)
 	goto next;
 
@@ -4318,6 +4339,7 @@ void CInode::scrub_initialize(CDentry *scrub_parent,
     for (std::list<frag_t>::iterator i = frags.begin();
         i != frags.end();
         ++i) {
+      dout(20) << "initializing map for " << *i << dendl;
       if (header.get_force())
 	scrub_infop->dirfrag_stamps[*i].reset();
       else
@@ -4341,7 +4363,8 @@ void CInode::scrub_initialize(CDentry *scrub_parent,
 int CInode::scrub_dirfrag_next(frag_t* out_dirfrag)
 {
   dout(20) << __func__ << dendl;
-  assert(scrub_is_in_progress());
+  if (!scrub_is_in_progress())
+    return ENOENT;
 
   if (!is_dir()) {
     return -ENOTDIR;
@@ -4389,7 +4412,6 @@ void CInode::scrub_dirfrags_scrubbing(list<frag_t>* out_dirfrags)
 void CInode::scrub_dirfrag_finished(frag_t dirfrag)
 {
   dout(20) << __func__ << " on frag " << dirfrag << dendl;
-  assert(scrub_is_in_progress());
 
   std::map<frag_t, scrub_stamp_info_t>::iterator i =
       scrub_infop->dirfrag_stamps.find(dirfrag);
@@ -4407,11 +4429,11 @@ void CInode::scrub_finished(MDSInternalContextBase **c) {
       scrub_infop->dirfrag_stamps.begin();
       i != scrub_infop->dirfrag_stamps.end();
       ++i) {
-    if(i->second.last_scrub_version != i->second.scrub_start_version) {
+    if (i->second.last_scrub_version != i->second.scrub_start_version) {
+      /* XXX stronger check here? */
       derr << i->second.last_scrub_version << " != "
-        << i->second.scrub_start_version << dendl;
+	   << i->second.scrub_start_version << dendl;
     }
-    assert(i->second.last_scrub_version == i->second.scrub_start_version);
   }
 
   scrub_infop->last_scrub_version = scrub_infop->scrub_start_version;
