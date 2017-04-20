@@ -26,10 +26,16 @@
 
 #include "include/elist.h"
 
+/* XXX */
+#include "common/LogClient.h"
+#include "mds/MDSRank.h"
+#include "mds/MDCache.h"
+
 class MDCache;
 class Finisher;
 
 class ScrubStack {
+  friend class C_MDS_ScrubDirfrag;
 protected:
   /// A finisher needed so that we don't re-enter kick_off_scrubs
   Finisher *finisher;
@@ -44,16 +50,19 @@ protected:
 
   class C_KickOffScrubs : public MDSInternalContext {
     ScrubStack *stack;
+    bool finished;
   public:
-    C_KickOffScrubs(MDCache *mdcache, ScrubStack *s);
-    void finish(int r) override { }
-    void complete(int r) override {
+    C_KickOffScrubs(MDCache *mdcache, ScrubStack *s) :
+      MDSInternalContext(mdcache->mds), stack(s), finished(false) {
+      stack->scrubs_in_progress++;
+    }
+    ~C_KickOffScrubs() { if (!finished) stack->scrubs_in_progress--; }
+    void finish (int r) {
+      finished = true;
       stack->scrubs_in_progress--;
       stack->kick_off_scrubs();
-      // don't delete self
     }
   };
-  C_KickOffScrubs scrub_kick;
 
 public:
   MDCache *mdcache;
@@ -64,7 +73,6 @@ public:
     scrubs_in_progress(0),
     scrubstack(this),
     stack_size(0),
-    scrub_kick(mdc, this),
     mdcache(mdc) {}
   ~ScrubStack() {
     assert(inode_stack.empty());
@@ -103,7 +111,9 @@ private:
    * Kick off as many scrubs as are appropriate, based on the current
    * state of the stack.
    */
+  /* XXX */ public:
   void kick_off_scrubs();
+  /* XXX */ private:
   /**
    * Push a indoe on top of the stack.
    */
@@ -111,12 +121,17 @@ private:
   /**
    * Push a inode to the bottom of the stack.
    */
-  inline void push_inode_bottom(CInode *in);
+  void push_inode_bottom(CInode *in);
   /**
    * Pop the given inode off the stack.
    */
-  inline void pop_inode(CInode *in);
+  /* XXX */ public:
+  void pop_inode_if(CInode *in);
+  /*inline*/ void pop_inode(CInode *in);
+  /* XXX */ private:
   CInode *front_inode();
+
+  void dump_stack();
 
   /**
    * Scrub a file inode.
@@ -170,8 +185,12 @@ private:
    * progress. Try again later.
    *
    */
+  /* XXX */ public:
   void scrub_dirfrag(CDir *dir, ScrubHeader& header,
-		     bool *added_children, bool *is_terminal, bool *done);
+		     bool *added_children, bool *is_terminal, bool *done,
+		     MDSInternalContext *onfinish);
+  void scrub_complete(dirfrag_t df, nest_info_t rstat);
+  /* XXX */ private:
   /**
    * Scrub a directory-representing dentry.
    *
@@ -191,6 +210,79 @@ private:
    */
   bool get_next_cdir(CInode *in, CDir **new_dir);
 
+};
+
+class C_MDS_ScrubDirfrag : public MDSInternalContext {
+protected:
+  ScrubStack *ss;
+  dirfrag_t fg;
+  ScrubHeader header;
+  bool finished;
+
+public:
+  C_MDS_ScrubDirfrag (ScrubStack* _ss, dirfrag_t _fg,
+		      ScrubHeader _header)
+    : MDSInternalContext(_ss->mdcache->mds), ss(_ss), fg(_fg),
+      header(_header), finished(false) {
+      LogChannelRef log = ss->mdcache->mds->clog;
+      log->info() << "start scrub op " << this;
+      ++ss->scrubs_in_progress;
+  }
+
+  ~C_MDS_ScrubDirfrag() { if (!finished) ss->scrubs_in_progress--; }
+
+  void finish (int r) {
+    bool added_children, is_terminal, done;
+    CDir *dir = mds->mdcache->get_dirfrag(fg);
+    LogChannelRef clog = ss->mdcache->mds->clog;
+    ss->scrubs_in_progress--;
+    finished = true;
+    clog->info() << "end scrub op " << this;
+    if (!dir) {
+      CInode *ino = ss->mdcache->get_inode(fg.ino);
+      if (!ino) {
+	C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(ss, fg, header);
+	ss->mdcache->open_ino(fg.ino, 0, sdf);
+	return;
+      }
+      assert(ino->is_dir());
+      if (!ino->is_auth()) {
+	MMDSScrubPath *msg = new MMDSScrubPath(fg, header);
+	mds->send_message_mds(msg, ino->authority().first);
+	if (ino->item_scrub.is_on_list()) {
+	  ss->pop_inode(ino);
+	}
+	ss->kick_off_scrubs();
+	return;
+      } else {
+	assert(0);
+      }
+    }
+
+    dir->scrub_info()->header = header;
+    C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(ss, fg, header);
+    ss->scrub_dirfrag(dir, header, &added_children, &is_terminal, &done, sdf);
+
+    if (!dir->is_auth()) {
+      clog->info() << "context: lost " << *dir;
+      dir->scrub_abort();
+      return;
+    }
+
+    if (is_terminal && done) {
+      dir->get_inode()->scrub_dirfrag_finished(fg.frag);
+      ss->scrub_dir_inode_final(dir->get_inode());
+      return;
+    }
+
+    if (!dir->get_inode()->scrub_is_in_progress()) {
+      CDentry *parent_dn = dir->inode->get_parent_dn();
+      dir->get_inode()->scrub_initialize(parent_dn, header, NULL);
+    }
+
+    ss->push_inode_bottom(dir->get_inode());
+    ss->kick_off_scrubs();
+  }
 };
 
 #endif /* SCRUBSTACK_H_ */
