@@ -34,6 +34,8 @@
 #include "Mutation.h"
 
 #include "messages/MClientRequest.h"
+#include "messages/MMDSScrubPath.h"
+#include "messages/MMDSScrubComplete.h"
 #include "messages/MMDSSlaveRequest.h"
 
 class PerfCounters;
@@ -1219,12 +1221,16 @@ public:
   void enqueue_scrub(const string& path, const std::string &tag,
                      bool force, bool recursive, bool repair,
 		     Formatter *f, Context *fin);
+  void enqueue_scrub_dirfrag(dirfrag_t fg, const std::string &tag,
+			     inodeno_t root, bool force, bool repair);
   void repair_inode_stats(CInode *diri);
   void repair_dirfrag_stats(CDir *dir);
 
 public:
   /* Because exports may fail, this set lets us keep track of inodes that need exporting. */
   std::set<CInode *> export_pin_queue;
+  void handle_scrub_path(MMDSScrubPath *m);
+  void handle_scrub_complete(MMDSScrubComplete *m);
 };
 
 class C_MDS_RetryRequest : public MDSInternalContext {
