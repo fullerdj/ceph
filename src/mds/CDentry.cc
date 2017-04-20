@@ -138,7 +138,7 @@ mds_authority_t CDentry::authority() const
 void CDentry::add_waiter(uint64_t tag, MDSInternalContextBase *c)
 {
   // wait on the directory?
-  if (tag & (WAIT_UNFREEZE|WAIT_SINGLEAUTH)) {
+  if (tag & (WAIT_UNFREEZE|WAIT_SINGLEAUTH|WAIT_SCRUBQUEUE)) {
     dir->add_waiter(tag, c);
     return;
   }

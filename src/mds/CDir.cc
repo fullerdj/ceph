@@ -2608,7 +2608,7 @@ void CDir::set_dir_auth(mds_authority_t a)
   // newly single auth?
   if (was_ambiguous && dir_auth.second == CDIR_AUTH_UNKNOWN) {
     list<MDSInternalContextBase*> ls;
-    take_waiting(WAIT_SINGLEAUTH, ls);
+    take_waiting(WAIT_SINGLEAUTH | WAIT_SCRUBQUEUE, ls);
     cache->mds->queue_waiters(ls);
   }
 }

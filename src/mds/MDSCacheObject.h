@@ -94,6 +94,7 @@ class MDSCacheObject {
 
 
   // -- wait --
+  const static uint64_t WAIT_SCRUBQUEUE  = (1ull<<62);
   const static uint64_t WAIT_ORDERED	 = (1ull<<61);
   const static uint64_t WAIT_SINGLEAUTH  = (1ull<<60);
   const static uint64_t WAIT_UNFREEZE    = (1ull<<59); // pka AUTHPINNABLE
