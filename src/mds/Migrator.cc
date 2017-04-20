@@ -699,6 +699,7 @@ void Migrator::maybe_do_queued_export()
     CDir *dir = mds->mdcache->get_dirfrag(df);
     if (!dir) continue;
     if (!dir->is_auth()) continue;
+    if (dir->get_cum_auth_pins()) continue;
 
     dout(0) << "nicely exporting to mds." << dest << " " << *dir << dendl;
 
