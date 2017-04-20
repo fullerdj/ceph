@@ -13,9 +13,11 @@
  */
 
 #include <iostream>
+#include <atomic>
 
 #include "ScrubStack.h"
 #include "common/Finisher.h"
+#include "common/Mutex.h"
 #include "mds/MDSRank.h"
 #include "mds/MDCache.h"
 #include "mds/MDSContinuation.h"
@@ -31,6 +33,7 @@ static ostream& _prefix(std::ostream *_dout, MDSRank *mds) {
 void ScrubStack::push_inode(CInode *in)
 {
   dout(20) << "pushing " << *in << " on top of ScrubStack" << dendl;
+  Mutex::Locker l(stack_lock);
   if (!in->item_scrub.is_on_list()) {
     in->get(CInode::PIN_SCRUBQUEUE);
     stack_size++;
@@ -41,6 +44,7 @@ void ScrubStack::push_inode(CInode *in)
 void ScrubStack::push_inode_bottom(CInode *in)
 {
   dout(20) << "pushing " << *in << " on bottom of ScrubStack" << dendl;
+  Mutex::Locker l(stack_lock);
   if (!in->item_scrub.is_on_list()) {
     in->get(CInode::PIN_SCRUBQUEUE);
     stack_size++;
@@ -50,12 +54,17 @@ void ScrubStack::push_inode_bottom(CInode *in)
 
 void ScrubStack::pop_inode(CInode *in)
 {
-  dout(20) << "popping " << *in
-          << " off of ScrubStack" << dendl;
+  dout(20) << "popping " << *in << " off of ScrubStack" << dendl;
+  Mutex::Locker l(stack_lock);
   assert(in->item_scrub.is_on_list());
   in->put(CInode::PIN_SCRUBQUEUE);
   in->item_scrub.remove_myself();
   stack_size--;
+}
+
+CInode *ScrubStack::front_inode() {
+  Mutex::Locker l(stack_lock);
+  return stack_size ? inode_stack.front() : nullptr;
 }
 
 void ScrubStack::_enqueue_inode(CInode *in, CDentry *parent,
@@ -84,11 +93,9 @@ void ScrubStack::kick_off_scrubs()
   dout(20) << __func__ << " entering with " << scrubs_in_progress << " in "
               "progress and " << stack_size << " in the stack" << dendl;
   bool can_continue = true;
-  elist<CInode*>::iterator i = inode_stack.begin();
   while (g_conf->mds_max_scrub_ops_in_progress > scrubs_in_progress &&
-      can_continue && !i.end()) {
-    CInode *curi = *i;
-    ++i; // we have our reference, push iterator forward
+	 can_continue && front_inode()) {
+    CInode *curi = front_inode();
 
     dout(20) << __func__ << " examining " << *curi << dendl;
 
