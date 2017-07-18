@@ -20,6 +20,7 @@
 #include "Migrator.h"
 #include "Locker.h"
 #include "Server.h"
+#include "ScrubStack.h"
 
 #include "MDBalancer.h"
 #include "MDLog.h"
@@ -1352,7 +1353,8 @@ void Migrator::export_go_synced(CDir *dir, uint64_t tid)
 
   // set ambiguous auth
   cache->adjust_subtree_auth(dir, mds->get_nodeid(), dest);
-  bool scrubbing = dir->is_scrub_queued();
+  bool scrubbing = dir->is_scrub_queued()
+    || mds->scrubstack->is_pending_dirfrag(dir->dirfrag());
   if (scrubbing) {
     dout(20) << "is_scrub_queued: " << *dir << dendl;
     dir->scrub_abort();
@@ -1381,6 +1383,7 @@ void Migrator::export_go_synced(CDir *dir, uint64_t tid)
 
   req->scrub = scrubbing;
   if (scrubbing) {
+    assert(dir->inode->scrub_infop);
     req->scrub_header = dir->inode->scrub_infop->header;
   }
 

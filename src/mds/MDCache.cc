@@ -7809,6 +7809,10 @@ void MDCache::dispatch(Message *m)
   case MSG_MDS_SCRUBCOMPLETE:
     handle_scrub_complete(static_cast<MMDSScrubComplete *>(m));
     break;
+
+  case MSG_MDS_SCRUBINODE:
+    handle_scrub_inode(static_cast<MMDSScrubInode *>(m));
+    break;
     
   default:
     derr << "cache unknown message " << m->get_type() << dendl;
@@ -8769,6 +8773,34 @@ void MDCache::handle_scrub_complete(MMDSScrubComplete *m)
 {
   dout(10) << "handle_scrub_complete " << *m << dendl;
   mds->scrubstack->scrub_complete(m->dirfrag, m->rstat);
+}
+
+void MDCache::enqueue_scrub_inode(inodeno_t ino, const std::string tag,
+				  inodeno_t root, bool force, bool repair)
+{
+  if (have_inode(ino)) {
+    CInode *in = get_inode(ino);
+    std::string path;
+    in->make_path_string(path);
+    enqueue_scrub(path, tag, force, true, repair, nullptr, nullptr);
+    return;
+  }
+
+  open_ino(ino, 0, new MDSInternalContextWrapper(mds,
+		    new FunctionContext(
+		      [this, ino, tag, root, force, repair](int r) {
+		        enqueue_scrub_inode(ino, tag, root, force, repair);
+		      }
+		    )
+	          )
+    );
+}
+  
+
+void MDCache::handle_scrub_inode(MMDSScrubInode *m)
+{
+  dout(10) << "handle_scrub_inode " << *m << dendl;
+  enqueue_scrub_inode(m->inodeno, m->tag, m->root, m->force, m->repair);
 }
 
 void MDCache::kick_open_ino_peers(mds_rank_t who)
@@ -12068,7 +12100,7 @@ public:
 
 void MDCache::enqueue_scrub(
     const string& path,
-    const std::string &tag,
+    const std::string tag,
     bool force, bool recursive, bool repair,
     Formatter *f, Context *fin)
 {
@@ -12114,43 +12146,6 @@ void MDCache::enqueue_scrub_work(MDRequestRef& mdr)
   }
 
   mds->server->respond_to_request(mdr, 0);
-
-  #if 0
-  set<SimpleLock*> rdlocks, wrlocks, xlocks;
-  CInode *in = mds->server->rdlock_path_pin_ref(mdr, 0, rdlocks, false);
-  if (NULL == in)
-    return;
-
-  bool locked = mds->locker->acquire_locks(mdr, rdlocks, wrlocks, xlocks);
-  if (!locked)
-    return;
-
-  C_MDS_EnqueueScrub *cs = static_cast<C_MDS_EnqueueScrub*>(mdr->internal_op_finish);
-  ScrubHeader& header = cs->header;
-
-  // Cannot scrub same dentry twice at same time
-  if (in->scrub_infop && in->scrub_infop->scrub_in_progress) {
-    mds->server->respond_to_request(mdr, -EBUSY);
-    return;
-  } else {
-    in->scrub_info();
-  }
-
-  header.set_origin(in);
-  header.set_oi(header.get_origin()->inode.ino);
-
-  // only set completion context for non-recursive scrub, because we don't 
-  // want to block asok caller on long running scrub
-  if (!header.get_recursive()) {
-    Context *fin = cs->take_finisher();
-    mds->scrubstack->enqueue_inode_top(in, header,
-				       new MDSInternalContextWrapper(mds, fin));
-  } else
-    mds->scrubstack->enqueue_inode_bottom(in, header, NULL);
-
-  mds->server->respond_to_request(mdr, 0);
-  return;
-  #endif
 }
 
 class C_MDS_EnqueueScrubDirfrag : public MDSInternalContext {
@@ -12173,30 +12168,27 @@ public:
   void finish (int r) {
     CDir *target = mdc->get_dirfrag(fg);
     if (!target) {
-      C_MDS_EnqueueScrubDirfrag *esdf = new C_MDS_EnqueueScrubDirfrag(mdc, mdr,
-								      fg, root,
-								      tag,
-								      force,
-								      repair);
       if (!mdc->have_inode(fg.ino)) {
+	C_MDS_EnqueueScrubDirfrag *esdf =
+	  new C_MDS_EnqueueScrubDirfrag(mdc, mdr, fg, root, tag, force, repair);
 	mdc->open_ino(fg.ino, 0, esdf);
 	return;
       }
 
-      CInode *ino = mdc->get_inode(fg.ino);
-      assert(ino);
-      assert(ino->is_dir());
+      CInode *in = mdc->get_inode(fg.ino);
+      assert(in);
+      assert(in->is_dir());
 
-      if (!ino->is_auth()) {
-	C_MDS_EnqueueScrub *cs = static_cast<C_MDS_EnqueueScrub *>(mdr->internal_op_finish);
-	MMDSScrubPath *msg = new MMDSScrubPath(fg, cs->header);
-	mds->send_message_mds(msg, ino->authority().first);
-	mds->server->respond_to_request(mdr, 0);
-	return;
+      list<frag_t> ls;
+      in->dirfragtree.get_leaves_under(in->dirfragtree.get_branch_or_leaf(fg.frag), ls);
+      assert(!ls.empty());
+      mds->server->respond_to_request(mdr, 0);
+      for (frag_t f : ls) {
+	mdc->enqueue_scrub_dirfrag(dirfrag_t(fg.ino, f),
+				   tag, root, force, repair);
       }
-
-      target = ino->get_dirfrag(fg.frag);
-      assert(target);
+	
+      return;
     }
     mdc->enqueue_scrub_dirfrag(fg, tag, root, force, repair);
     mds->server->respond_to_request(mdr, 0);
@@ -12245,7 +12237,7 @@ public:
   }
 };
 
-void MDCache::enqueue_scrub_dirfrag(dirfrag_t fg, const std::string &tag,
+void MDCache::enqueue_scrub_dirfrag(dirfrag_t fg, const std::string tag,
 				    inodeno_t root, bool force, bool repair)
 {
   dout(10) << __func__ << " " << fg << " tag " << tag << dendl;
@@ -12266,11 +12258,22 @@ void MDCache::enqueue_scrub_dirfrag(dirfrag_t fg, const std::string &tag,
   mdr->internal_op_finish = cs;
 
   if (!target) {
-    C_MDS_EnqueueScrubDirfrag *esdf = new C_MDS_EnqueueScrubDirfrag(this, mdr,
-								    fg, root,
-								    tag, force,
-								    repair);
-    open_ino(fg.ino, 0, esdf);
+    CInode *in = get_inode(fg.ino);
+    if (!in) {
+      C_MDS_EnqueueScrubDirfrag *esdf =
+	new C_MDS_EnqueueScrubDirfrag(this, mdr, fg, root, tag, force, repair);
+      open_ino(fg.ino, 0, esdf);
+      return;
+    }
+
+    // dirfrags changed; queue the right ones.
+    list<CDir *> targets;
+    in->get_approx_dirfrags(fg.frag, targets);
+    assert(!targets.empty());
+    mds->server->respond_to_request(mdr, 0);
+    for (CDir *dir : targets) {
+      enqueue_scrub_dirfrag(dir->dirfrag(), tag, root, force, repair);
+    }
     return;
   }
 
@@ -12303,16 +12306,13 @@ void MDCache::enqueue_scrub_dirfrag(dirfrag_t fg, const std::string &tag,
     in->scrub_initialize(parent_dn, header, sc);
   } else {
     dout(20) << " already scrubbing " << *target->inode << dendl;
-    sc->set_kick();
+    if (sc) sc->set_kick();
     delete in->scrub_info()->on_finish;
     in->scrub_info()->on_finish = nullptr;
     in->scrub_set_finisher(sc);
     if (!in->item_scrub.is_on_list()) {
       dout(20) << *target << " is not on list" << dendl;
-      mds->scrubstack->enqueue_inode_bottom(in, header, NULL);
     }
-    mds->server->respond_to_request(mdr, 0);
-    return;
   }
 
   C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(mds->scrubstack, fg, header);
@@ -12323,7 +12323,8 @@ void MDCache::enqueue_scrub_dirfrag(dirfrag_t fg, const std::string &tag,
     if (in->scrub_is_in_progress()) {
       MDSInternalContextBase *c = nullptr;
       if (target->is_auth()) {
-	in->scrub_finished(&c);
+	/* XXX need to check all_frags_done here. */
+	in->scrub_dirfrag_finished(target->dirfrag().frag);
       } else {
 	delete in->scrub_info()->on_finish;
 	in->scrub_info()->on_finish = nullptr;
@@ -12332,8 +12333,11 @@ void MDCache::enqueue_scrub_dirfrag(dirfrag_t fg, const std::string &tag,
 	mds->finisher->queue(new MDSIOContextWrapper(mds, c), 0);
       }
     }
-  } else if (target->is_auth() && !target->is_ambiguous_auth()) {
-    mds->scrubstack->enqueue_inode_bottom(in, header, NULL);
+  } else if (target->is_auth() && !target->is_ambiguous_auth()
+	     && target->get_inode()->ino() != header.get_oi()) {
+    dout(20) << "origin " << header.get_origin() << " target "
+	     << target->get_inode() << dendl;
+    mds->scrubstack->push_pending_dirfrag(target->dirfrag(), header);
   }
 
   mds->scrubstack->kick_off_scrubs();

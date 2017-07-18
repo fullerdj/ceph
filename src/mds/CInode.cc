@@ -609,6 +609,30 @@ CDir *CInode::get_approx_dirfrag(frag_t fg)
   return NULL;
 }	
 
+void CInode::get_approx_dirfrags(frag_t fg, list<CDir*>& ls)
+{
+  CDir *dir = get_dirfrag(fg);
+  if (dir) {
+    ls.push_back(dir);
+    return;
+  }
+
+  // find a child?
+  get_dirfrags_under(fg, ls);
+  if (!ls.empty()) 
+    return;
+
+  // try parents?
+  while (fg.bits() > 0) {
+    fg = fg.parent();
+    dir = get_dirfrag(fg);
+    if (dir) {
+      ls.push_back(dir);
+      return;
+    }
+  }
+}
+
 void CInode::get_dirfrags(list<CDir*>& ls) 
 {
   // all dirfrags
@@ -654,8 +678,14 @@ CDir *CInode::get_or_open_dirfrag(MDCache *mdcache, frag_t fg)
 
 CDir *CInode::add_dirfrag(CDir *dir)
 {
+  dout(20) << __func__ << " " << dir->dirfrag().frag << dendl;
   assert(dirfrags.count(dir->dirfrag().frag) == 0);
   dirfrags[dir->dirfrag().frag] = dir;
+
+  if (scrub_infop) {
+    dout(20) << "adding " << dir->dirfrag().frag << " to scrub stamps" << dendl;
+    scrub_infop->dirfrag_stamps[dir->dirfrag().frag];
+  }
 
   if (stickydir_ref > 0) {
     dir->state_set(CDir::STATE_STICKY);
@@ -693,6 +723,10 @@ void CInode::close_dirfrag(frag_t fg)
   assert(dir->get_num_ref() == 0);
   delete dir;
   dirfrags.erase(fg);
+
+  if (scrub_infop) {
+    scrub_infop->dirfrag_stamps.erase(fg);
+  }
 }
 
 void CInode::close_dirfrags()
@@ -2509,7 +2543,7 @@ void CInode::adjust_nested_auth_pins(int a, void *by)
       if (!dir->is_subtree_root() && dir->get_cum_auth_pins())
 	s++;
     } 
-    assert(s == nested_auth_pins);
+    //assert(s == nested_auth_pins);
   } 
 
   if (parent)
@@ -4030,14 +4064,15 @@ next:
 
     bool check_dirfrag_rstats() {
       MDSGatherBuilder gather(g_ceph_context);
-      std::list<frag_t> frags;
+      list<frag_t> frags;
+      list<CDir *> needs_fetch;
       in->dirfragtree.get_leaves(frags);
       for (list<frag_t>::iterator p = frags.begin();
           p != frags.end();
           ++p) {
         CDir *dir = in->get_or_open_dirfrag(in->mdcache, *p);
 	if (!dir->is_auth()) {
-	  return immediate(DIRFRAGS, 0);
+	  continue; /* XXX */
 	}
 	dir->scrub_info();
 	if (!dir->scrub_infop->header)
@@ -4053,12 +4088,17 @@ next:
 	  dir->scrub_local();
 	} else {
 	  dir->scrub_infop->need_scrub_local = true;
-	  dir->fetch(gather.new_sub(), false);
+	  // can't activate gather here because we might hit a frozen frag later
+	  needs_fetch.push_back(dir);
 	}
       }
-      if (gather.has_subs()) {
-        gather.set_finisher(get_internal_callback(DIRFRAGS));
-        gather.activate();
+      if (!needs_fetch.empty()) {
+	list<MDSInternalContextBase *> subs;
+	for (CDir *d : needs_fetch) {
+	  d->fetch(gather.new_sub(), false);
+	}
+	gather.set_finisher(get_internal_callback(DIRFRAGS));
+	gather.activate();
         return false;
       } else {
         return immediate(DIRFRAGS, 0);
@@ -4412,6 +4452,8 @@ void CInode::scrub_dirfrags_scrubbing(list<frag_t>* out_dirfrags)
 void CInode::scrub_dirfrag_finished(frag_t dirfrag)
 {
   dout(20) << __func__ << " on frag " << dirfrag << dendl;
+
+  assert(scrub_infop);
 
   std::map<frag_t, scrub_stamp_info_t>::iterator i =
       scrub_infop->dirfrag_stamps.find(dirfrag);

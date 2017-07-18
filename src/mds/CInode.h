@@ -526,6 +526,7 @@ public:
   }
   bool get_dirfrags_under(frag_t fg, std::list<CDir*>& ls);
   CDir* get_approx_dirfrag(frag_t fg);
+  void get_approx_dirfrags(frag_t fg, std::list<CDir*>& ls);
   void get_dirfrags(std::list<CDir*>& ls);
   void get_nested_dirfrags(std::list<CDir*>& ls);
   void get_subtree_dirfrags(std::list<CDir*>& ls);

@@ -2112,8 +2112,9 @@ void MDSRank::command_scrub_path(Formatter *f, const string& path, vector<string
   {
     Mutex::Locker l(mds_lock);
     mdcache->enqueue_scrub(path, "", force, recursive, repair, f, &scond);
+    scond.wait();
   }
-  scond.wait();
+  //scond.wait();
   // scrub_dentry() finishers will dump the data for us; we're done!
 }
 

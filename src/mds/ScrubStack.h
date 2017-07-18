@@ -41,6 +41,7 @@ protected:
   Finisher *finisher;
 
   Mutex stack_lock;
+  list<pair<dirfrag_t, ScrubHeader> > pending_dirfrags;
   /// The stack of dentries we want to scrub
   elist<CInode*> inode_stack;
   /// current number of dentries we're actually scrubbing
@@ -96,6 +97,21 @@ public:
   void enqueue_inode_bottom(CInode *in, const ScrubHeader& header,
 			    MDSInternalContextBase *on_finish) {
     enqueue_inode(in, header, on_finish, false);
+  }
+
+  void push_pending_dirfrag(dirfrag_t df, ScrubHeader header) {
+    Mutex::Locker l(stack_lock);
+    pending_dirfrags.push_back(make_pair(df, header));
+  }
+
+  bool is_pending_dirfrag(dirfrag_t df) {
+    Mutex::Locker l(stack_lock);
+    for (auto pr : pending_dirfrags) {
+      if (pr.first == df) {
+	return true;
+      }
+    }
+    return false;
   }
 
 private:
@@ -226,37 +242,39 @@ public:
       header(_header), finished(false) {
       LogChannelRef log = ss->mdcache->mds->clog;
       log->info() << "start scrub op " << this;
-      ++ss->scrubs_in_progress;
+      //++ss->scrubs_in_progress;
   }
 
-  ~C_MDS_ScrubDirfrag() { if (!finished) ss->scrubs_in_progress--; }
+  //~C_MDS_ScrubDirfrag() { if (!finished) ss->scrubs_in_progress--; }
 
   void finish (int r) {
     bool added_children, is_terminal, done;
     CDir *dir = mds->mdcache->get_dirfrag(fg);
     LogChannelRef clog = ss->mdcache->mds->clog;
-    ss->scrubs_in_progress--;
+    //ss->scrubs_in_progress--;
     finished = true;
     clog->info() << "end scrub op " << this;
+
     if (!dir) {
-      CInode *ino = ss->mdcache->get_inode(fg.ino);
-      if (!ino) {
+      CInode *in = ss->mdcache->get_inode(fg.ino);
+      if (!in) {
 	C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(ss, fg, header);
 	ss->mdcache->open_ino(fg.ino, 0, sdf);
 	return;
       }
-      assert(ino->is_dir());
-      if (!ino->is_auth()) {
-	MMDSScrubPath *msg = new MMDSScrubPath(fg, header);
-	mds->send_message_mds(msg, ino->authority().first);
-	if (ino->item_scrub.is_on_list()) {
-	  ss->pop_inode(ino);
-	}
-	ss->kick_off_scrubs();
-	return;
-      } else {
-	assert(0);
+
+      assert(in->is_dir());
+
+      list<CDir*> targets;
+      in->get_approx_dirfrags(fg.frag, targets);
+      assert(!targets.empty());
+      for (CDir *d : targets) {
+	mds->mdcache->enqueue_scrub_dirfrag(d->dirfrag(), header.get_tag(),
+					    header.get_oi(),
+					    header.get_force(),
+					    header.get_repair());
       }
+      return;
     }
 
     dir->scrub_info()->header = header;
@@ -269,18 +287,25 @@ public:
       return;
     }
 
-    if (is_terminal && done) {
-      dir->get_inode()->scrub_dirfrag_finished(fg.frag);
-      ss->scrub_dir_inode_final(dir->get_inode());
+    CInode *ino = dir->get_inode();
+
+    if (is_terminal && done && ino->item_scrub.is_on_list()) {
+      ino->scrub_dirfrag_finished(fg.frag);
+      /* XXX XXX maybe not. */
+      //ss->scrub_dir_inode_final(dir->get_inode());
       return;
     }
 
-    if (!dir->get_inode()->scrub_is_in_progress()) {
+    if (!dir->get_inode()->scrub_is_in_progress()
+	&& ino != header.get_origin()) {
+      ss->push_pending_dirfrag(fg, header);
+      /*
       CDentry *parent_dn = dir->inode->get_parent_dn();
       dir->get_inode()->scrub_initialize(parent_dn, header, NULL);
+      */
     }
 
-    ss->push_inode_bottom(dir->get_inode());
+    //   ss->push_inode_bottom(dir->get_inode());
     ss->kick_off_scrubs();
   }
 };

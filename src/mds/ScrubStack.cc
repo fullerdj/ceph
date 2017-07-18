@@ -22,6 +22,7 @@
 #include "mds/MDCache.h"
 #include "mds/MDSContinuation.h"
 #include "messages/MMDSScrubPath.h"
+#include "messages/MMDSScrubInode.h"
 
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_mds
@@ -132,6 +133,7 @@ void ScrubStack::kick_off_scrubs()
   dout(20) << __func__ << " entering with " << scrubs_in_progress << " in "
               "progress and " << stack_size << " in the stack" << dendl;
   bool can_continue = true;
+  int tries = 0;
 
   dump_stack();
 
@@ -155,6 +157,7 @@ void ScrubStack::kick_off_scrubs()
       bool completed; // it's done, so pop it off the stack
       bool terminal; // not done, but we can start ops on other directories
       bool progress; // it added new dentries to the top of the stack
+	
       scrub_dir_inode(curi, &progress, &terminal, &completed);
       if (completed) {
         dout(20) << __func__ << " dir completed" << dendl;
@@ -171,8 +174,12 @@ void ScrubStack::kick_off_scrubs()
 	    dout(20) << "looking for " << *curi << dendl;
 	    continue;
 	  } else if (nop != curi) {
-	    dout(20) << "trying again" << dendl;
-	    continue;
+	    if (tries++ < stack_size) {
+	      dout(20) << "trying again" << dendl;
+	      continue;
+	    } else {
+	      break;
+	    }
 	  } else {
 	    dout(20) << "found " << *curi << dendl;
 	  }
@@ -182,6 +189,22 @@ void ScrubStack::kick_off_scrubs()
       }
 
       can_continue = progress || terminal || completed;
+    }
+  }
+
+  {
+    Mutex::Locker l(stack_lock);
+
+    dout(20) << pending_dirfrags.size() << " pending dirfrags" << dendl;
+
+    if (!pending_dirfrags.empty()) {
+      pair<dirfrag_t, ScrubHeader> pr = pending_dirfrags.front();
+      dout(20) << "queuing " << pr.first << dendl;
+      pending_dirfrags.pop_front();
+      C_MDS_ScrubDirfrag *sdf = new C_MDS_ScrubDirfrag(this,
+						       pr.first, pr.second);
+      MDSIOContextWrapper *c = new MDSIOContextWrapper(mdcache->mds, sdf);
+      mdcache->mds->finisher->queue(c);
     }
   }
 }
@@ -308,8 +331,29 @@ bool ScrubStack::get_next_cdir(CInode *in, CDir **new_dir)
 
     if (!next_dir) {
       if (in->is_auth()) {
-	next_dir = in->get_or_open_dirfrag(mdcache, next_frag);
-	assert(next_dir);
+	next_dir = in->get_dirfrag(next_frag);
+	fragtree_t dft = in->dirfragtree;
+	if (!next_dir) {
+	  if (dft.contains(next_frag)) {
+	    next_dir = in->get_or_open_dirfrag(mdcache, next_frag);
+	    assert(next_dir);
+	  } else {
+	    dout(25) << "stale dirfrag " << next_frag << dendl;
+
+	    list<frag_t> ls;
+	    dft.get_leaves_under(next_frag, ls);
+	    if (ls.empty()) {
+	      frag_t branch = dft.get_branch(next_frag);
+	      dft.get_leaves_under(branch, ls);
+	    }
+
+	    for (frag_t f : ls) {
+	      in->scrub_info()->dirfrag_stamps[f];
+	    }
+
+	    return get_next_cdir(in, new_dir);
+	  }
+	}
       } else {
 	mdcache->open_remote_dirfrag(in, next_frag, new C_KickOffScrubs(mdcache, this));
 	return false;
@@ -325,7 +369,7 @@ bool ScrubStack::get_next_cdir(CInode *in, CDir **new_dir)
 	       << dendl;
       MMDSScrubPath *msg = new MMDSScrubPath(next_dir->dirfrag(),
 					     in->scrub_info()->header);
-      pop_inode(in);
+      //pop_inode_if(in);
       next_dir->scrub_abort();
       mdcache->mds->send_message_mds(msg, next_dir->authority().first);
       return false;
@@ -379,6 +423,15 @@ class C_ValidateDiskState : public MDSInternalContext
 void ScrubStack::scrub_dir_inode_final(CInode *in)
 {
   dout(20) << __func__ << " " << *in << dendl;
+
+  if (!in->is_auth()) {
+    if (in->has_subtree_root_dirfrag(mdcache->mds->get_nodeid())) {
+      MMDSScrubInode *msg = new MMDSScrubInode(in->inode.ino,
+					       in->scrub_info()->header);
+      mdcache->mds->send_message_mds(msg, in->authority().first);
+    }
+    return;
+  }
 
   // Two passes through this function.  First one triggers inode validation,
   // second one sets finally_done
@@ -496,13 +549,20 @@ void ScrubStack::scrub_dirfrag(CDir *dir,
       if (scrubbing.empty()) {
         dout(20) << __func__ << " dirfrag done: " << *dir << dendl;
         // FIXME: greg: What's the diff meant to be between done and terminal
-	dir->inode->scrub_dirfrag_finished(dir->frag); /* XXX? */
+	if (dir->inode->scrub_is_in_progress()) {
+	  dir->inode->scrub_dirfrag_finished(dir->frag); /* XXX? */
+	}
 	dir->scrub_finished();
         *done = true;
         *is_terminal = true;
       } else {
         dout(20) << __func__ << " " << scrubbing.size()
 		 << " dentries still scrubbing in " << *dir << dendl;
+	dout(25) << "dentries follow:" << dendl;
+	for (auto i : scrubbing) {
+	  dout(25) << *i << dendl;
+	}
+	dout(25) << "end dentries" << dendl;
 	/*
 	bool changed = false;
 	for (auto i : scrubbing) {
@@ -527,7 +587,12 @@ void ScrubStack::scrub_dirfrag(CDir *dir,
     // never get random IO errors here.
     assert(r == 0);
 
-    _enqueue_inode(dn->get_projected_inode(), dn, header, NULL, true);
+    CInode *in = dn->get_projected_inode();
+    assert(mdcache->have_inode(in->vino()));
+    in = mdcache->get_inode(in->vino());
+    //if (mdcache->have_inode(in->vino()))
+    ////_enqueue_inode(dn->get_projected_inode(), dn, header, NULL, true);
+    _enqueue_inode(in, dn, header, NULL, true);
 
     *added_children = true;
   }
@@ -537,49 +602,52 @@ void ScrubStack::scrub_dirfrag(CDir *dir,
 void ScrubStack::scrub_complete(dirfrag_t df, nest_info_t rstat)
 {
   CDir *dir = mdcache->get_dirfrag(df);
-  assert(dir);
+  if (!dir) {
+    /* XXX need to complete children. If a parent, just ignore it? */
+    CInode *in = mdcache->get_inode(df.ino);
+    assert(in);
+    list<CDir *> ls;
+    in->get_dirfrags_under(df.frag, ls);
+    for (CDir *d : ls) {
+      scrub_complete(d->dirfrag(), rstat);
+    }
+    return;
+  }
 
-  CDir *target = dir->get_parent_dir();
-  assert(target);
-
-  target->scrub_dentry_finished(dir->inode->get_parent_dn());
+  CDir *parent_dir = dir->get_parent_dir();
+  assert(parent_dir);
 
   if (dir->inode->scrub_is_in_progress()) {
     dir->inode->scrub_dirfrag_finished(dir->frag);
     dir->scrub_abort();
   }
 
-  scrub_dir_inode_final(dir->inode);
-
-  dout(20) << __func__ << " continuing with " << *target << dendl;
-
+  parent_dir->scrub_dentry_finished(dir->inode->get_parent_dn());
+  if (!dir->inode->item_scrub.is_on_list()) {
+    push_inode(dir->inode);
+  }
   ScrubHeader header = dir->scrub_info()->header;
 
-  if (!target->inode->scrub_is_in_progress()) {
-    mdcache->enqueue_scrub_dirfrag(target->dirfrag(), header.get_tag(),
+  if (!parent_dir->inode->scrub_is_in_progress()) {
+    mdcache->enqueue_scrub_dirfrag(parent_dir->dirfrag(), header.get_tag(),
 				   header.get_oi(), header.get_force(),
 				   header.get_repair());
   }
 
-  if (!target->inode->item_scrub.is_on_list()) {
-    push_inode(target->inode);
-  } else {
-    pop_inode(target->inode);
-    push_inode(target->inode);
+  if (!parent_dir->inode->item_scrub.is_on_list()) {
+    push_inode(parent_dir->inode);
   }
   kick_off_scrubs();
 }
 
 void ScrubStack::scrub_file_inode(CInode *in)
 {
-  // At this stage the DN is already past scrub_initialize, so
-  // it's in the cache, it has PIN_SCRUBQUEUE and it is authpinned
   CDir *dir = in->get_parent_dir();
   dout(20) << __func__ << " checking parent: " << *dir << dendl;
   if (dir && (dir->is_freezing_tree() || dir->is_frozen_tree())) {
     dout(20) << "frozen, waiting on validate" << dendl;
     C_ValidateDiskState *fin = new C_ValidateDiskState(mdcache->mds, this, in);
-    dir->add_waiter(CDir::WAIT_SINGLEAUTH, fin);
+    dir->add_waiter(CDir::WAIT_UNFREEZE, fin);
     return;
   }
 

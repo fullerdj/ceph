@@ -3182,17 +3182,9 @@ void CDir::scrub_abort()
 	d->scrub_abort();
       }
     }
-  }
 
-  if (inode->item_scrub.is_on_list()) {
-    cache->mds->scrubstack->pop_inode(inode);
-  }
-
-  if (inode->scrub_infop) {
-    if (inode->scrub_infop->scrub_in_progress) {
-      inode->scrub_infop->scrub_in_progress = false;
-      delete inode->scrub_infop->on_finish;
-      inode->scrub_infop->on_finish = nullptr;
+    if (in->item_scrub.is_on_list()) {
+      cache->mds->scrubstack->pop_inode(in);
     }
   }
 

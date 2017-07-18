@@ -9,41 +9,41 @@
  * modify it under the terms of the GNU Lesser General Public
  * License version 2.1, as published by the Free Software
  * Foundation.  See file COPYING.
- * 
+ *
  */
 
 
-#ifndef CEPH_MMDSSCRUBPATH_H
-#define CEPH_MMDSSCRUBPATH_H
+#ifndef CEPH_MMDSSCRUBINODE_H
+#define CEPH_MMDSSCRUBINODE_H
 
 #include "msg/Message.h"
 
 
-class MMDSScrubPath : public Message {
+class MMDSScrubInode : public Message {
  public:
-  dirfrag_t dirfrag;
+  inodeno_t inodeno;
   inodeno_t root;
   std::string tag;
   bool force;
   bool repair;
 
-  MMDSScrubPath() : Message(MSG_MDS_SCRUBPATH) {}
-  MMDSScrubPath(dirfrag_t _dirfrag, ScrubHeader& header)
-    : Message(MSG_MDS_SCRUBPATH), dirfrag(_dirfrag), root(header.get_oi()),
+  MMDSScrubInode() : Message(MSG_MDS_SCRUBINODE) {}
+  MMDSScrubInode(inodeno_t _inodeno, ScrubHeader& header)
+    : Message(MSG_MDS_SCRUBINODE), inodeno(_inodeno), root(header.get_oi()),
       tag(header.get_tag()), force(header.get_force()),
       repair(header.get_repair()) {}
 private:
-  ~MMDSScrubPath() {}
+  ~MMDSScrubInode() {}
 
 public:
-  const char *get_type_name() const { return "Sc"; }
+  const char *get_type_name() const { return "Si"; }
   void print(ostream& o) const {
-    o << "scrub_dirfrag(" << dirfrag << " tag " << tag << " force=" << force
+    o << "scrub_inode(" << inodeno << " tag " << tag << " force=" << force
       << " repair=" << repair << ")";
   }
 
   void encode_payload(uint64_t features) {
-    ::encode(dirfrag, payload);
+    ::encode(inodeno, payload);
     ::encode(root, payload);
     ::encode(tag, payload);
     ::encode(force, payload);
@@ -51,7 +51,7 @@ public:
   }
   void decode_payload() {
     bufferlist::iterator p = payload.begin();
-    ::decode(dirfrag, p);
+    ::decode(inodeno, p);
     ::decode(root, p);
     ::decode(tag, p);
     ::decode(force, p);
