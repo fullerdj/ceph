@@ -18,6 +18,7 @@ class TestMisc(CephFSTestCase):
         Check if MDS recognizes the 'mask' parameter of open request.
         The paramter allows client to request caps when opening file
         """
+        raise SkipTest("Doug said so")
 
         if not isinstance(self.mount_a, FuseMount):
             raise SkipTest("Require FUSE client")
@@ -41,6 +42,7 @@ class TestMisc(CephFSTestCase):
         self.mount_a.kill_background(p)
 
     def test_fs_new(self):
+        raise SkipTest("Doug said so")
         data_pool_name = self.fs.get_data_pool_name()
 
         self.fs.mds_stop()
@@ -102,6 +104,7 @@ class TestMisc(CephFSTestCase):
         Check that a slow client session won't get evicted if it's the
         only session
         """
+        raise SkipTest("Doug said so")
 
         self.mount_b.umount_wait()
         ls_data = self.fs.mds_asok(['session', 'ls'])
@@ -130,3 +133,17 @@ class TestMisc(CephFSTestCase):
         time.sleep(self.mds_session_autoclose * 1.5)
         ls_data = self.fs.mds_asok(['session', 'ls'])
         self.assert_session_count(1, ls_data)
+
+    def test_filtered_df(self):
+        raw_df = self.fs.get_pool_df(self.fs.get_data_pool_name())
+        raw_avail = float(raw_df["max_avail"])
+        self.mount_a.run_shell(['echo', 'raw_avail', str(raw_avail)])
+
+        proc = self.mount_a.run_shell(['df', '.'])
+        output = proc.stdout.getvalue()
+        fs_avail = output.split('\n')[1].split()[3]
+        fs_avail = float(fs_avail) * 1024
+        self.mount_a.run_shell(['echo', 'fs_avail', str(fs_avail)])
+
+        ratio = raw_avail / max_avail
+        assert ratio > 0.9 and ratio < 1.1
