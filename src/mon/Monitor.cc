@@ -2915,7 +2915,8 @@ void Monitor::log_health(
   }
 }
 
-void Monitor::get_cluster_status(stringstream &ss, Formatter *f)
+void Monitor::get_cluster_status(stringstream &ss, Formatter *f,
+				 const std::vector<fs_cluster_id_t> &fsids)
 {
   if (f)
     f->open_object_section("status");
@@ -2949,7 +2950,13 @@ void Monitor::get_cluster_status(stringstream &ss, Formatter *f)
     mgrstatmon()->print_summary(f, NULL);
     f->close_section();
     f->open_object_section("fsmap");
-    mdsmon()->get_fsmap().print_summary(f, NULL);
+    const FSMap *fsmapp = &mdsmon()->get_fsmap();
+    if (!fsids.empty()) {
+      FSMap map = *fsmapp;
+      map.filter(fsids);
+      fsmapp = &map;
+    }
+    fsmapp->print_summary(f, NULL);
     f->close_section();
     f->open_object_section("mgrmap");
     mgrmon()->get_map().print_summary(f, nullptr);
@@ -3001,8 +3008,14 @@ void Monitor::get_cluster_status(stringstream &ss, Formatter *f)
 	mgrmon()->get_map().print_summary(nullptr, &ss);
 	ss << "\n";
       }
-      if (mdsmon()->get_fsmap().filesystem_count() > 0) {
-	ss << "    mds: " << spacing << mdsmon()->get_fsmap() << "\n";
+      const FSMap *fsmapp = &mdsmon()->get_fsmap();
+      if (!fsids.empty()) {
+	FSMap map = *fsmapp;
+	map.filter(fsids);
+	fsmapp = &map;
+      }
+      if (fsmapp->filesystem_count() > 0) {
+	ss << "    mds: " << spacing << *fsmapp << "\n";
       }
       ss << "    osd: " << spacing;
       osdmon()->osdmap.print_summary(NULL, ss, string(maxlen + 6, ' '));
@@ -3543,7 +3556,7 @@ void Monitor::handle_command(MonOpRequestRef op)
 
     if (prefix == "status") {
       // get_cluster_status handles f == NULL
-      get_cluster_status(ds, f.get());
+      get_cluster_status(ds, f.get(), session->get_allowed_fsids());
 
       if (f) {
         f->flush(ds);

@@ -119,10 +119,6 @@ struct MDSCapMatch {
    * @param target_path filesystem path without leading '/'
    */
   bool match_path(std::string_view target_path) const;
-
-  int64_t uid;       // Require UID to be equal to this, if !=MDS_AUTH_UID_ANY
-  std::vector<gid_t> gids;  // Use these GIDs
-  std::string path;  // Require path to be child of this (may be "" or "/" for any)
 };
 
 struct MDSCapGrant {
