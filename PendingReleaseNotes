@@ -77,6 +77,7 @@
   batch together multiple IOs against the same backing RBD
   data block object. The librbd IO scheduler policy can be
   controlled via a new "rbd_io_scheduler" configuration
+<<<<<<< e03f4d89695d62f4245ab9a3d9541840fe8e7ee5
   option.
 
 * RGW: radosgw-admin introduces two subcommands that allow the
